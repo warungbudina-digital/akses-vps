@@ -48,6 +48,25 @@ func (s *deviceServiceServer) PublishCommand(ctx context.Context, req *devicev1.
 	return &devicev1.PublishCommandResponse{Accepted: true}, nil
 }
 
+// LinkSubscriberSession dipanggil FreeRADIUS (rlm_rest) saat Accounting-Start/
+// Stop/Interim-Update dari accel-ppp di PoP. Mencocokkan calling_station_id
+// (MAC CPE) ke device GenieACS lalu upsert ke koleksi subscriber_links.
+// Lihat docs/13-accel-ppp-integration.md untuk alur lengkap.
+func (s *deviceServiceServer) LinkSubscriberSession(ctx context.Context, req *devicev1.LinkSubscriberSessionRequest) (*devicev1.LinkSubscriberSessionResponse, error) {
+	if req.GetRadiusUsername() == "" || req.GetCallingStationId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "radius_username and calling_station_id are required")
+	}
+	// TODO: query devices koleksi GenieACS by MAC (calling_station_id), lalu
+	// upsert subscriber_links{_id: radius_username, device_id, pop, status}
+	slog.Info("link_subscriber_session",
+		"username", req.GetRadiusUsername(),
+		"mac", req.GetCallingStationId(),
+		"pop", req.GetPop(),
+		"event", req.GetEventType(),
+	)
+	return &devicev1.LinkSubscriberSessionResponse{Linked: false, DeviceId: ""}, nil
+}
+
 // NewGRPCServer merangkai gRPC server dengan seluruh interceptor (logging,
 // metrics, auth), health service, dan reflection (untuk debugging via
 // grpcurl — sebaiknya dimatikan di production murni lewat env flag).

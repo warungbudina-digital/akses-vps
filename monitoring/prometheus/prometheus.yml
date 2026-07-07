@@ -42,3 +42,10 @@ scrape_configs:
 # mosquitto-exporter, node-exporter, cadvisor) adalah container sidecar
 # tambahan opsional — tambahkan ke docker-compose.reference.yml /
 # routeros-chr.rsc sesuai kebutuhan. Semuanya join `obs-net` saja.
+
+  # --- accel-ppp / RADIUS (lihat docs/13-accel-ppp-integration.md) ---
+  # Target berada di belakang WireGuard (10.66.66.0/24) — Prometheus perlu
+  # rute ke subnet itu (jalankan dengan akses ke interface host jika perlu).
+  - job_name: "accel-ppp-pop1"
+    static_configs:
+      - targets: ["10.66.66.10:8080"]

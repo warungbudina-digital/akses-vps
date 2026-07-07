@@ -32,6 +32,7 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  radius-db-data:
 
 services:
   # -------------------- Edge --------------------
@@ -185,6 +186,27 @@ services:
     volumes:
       - redis-data:/data
     security_opt: ["no-new-privileges:true"]
+
+  # -------------------- AAA (accel-ppp integration, lihat docs/13) --------------------
+  radius-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [data-net]
+    environment:
+      POSTGRES_DB: radius
+      POSTGRES_USER: radius
+      POSTGRES_PASSWORD: ${RADIUS_DB_PASSWORD}
+    volumes:
+      - radius-db-data:/var/lib/postgresql/data
+    security_opt: ["no-new-privileges:true"]
+
+  freeradius:
+    image: freeradius/freeradius-server:3.2
+    restart: unless-stopped
+    network_mode: "host"   # wajib: harus bind persis ke IP WireGuard (10.66.66.1), bukan Docker bridge
+    volumes:
+      - ./freeradius/raddb:/etc/raddb:ro
+    depends_on: [radius-db]
 
   # -------------------- Observability --------------------
   prometheus:

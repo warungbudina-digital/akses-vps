@@ -11,6 +11,11 @@ service DeviceService {
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
   rpc GetDevice(GetDeviceRequest) returns (Device);
   rpc PublishCommand(PublishCommandRequest) returns (PublishCommandResponse);
+
+  // Dipanggil oleh FreeRADIUS (rlm_rest) saat Accounting-Start/Stop dari
+  // accel-ppp di PoP, untuk mengorelasikan sesi pelanggan dengan device
+  // GenieACS. Lihat docs/13-accel-ppp-integration.md.
+  rpc LinkSubscriberSession(LinkSubscriberSessionRequest) returns (LinkSubscriberSessionResponse);
 }
 
 message ListDevicesRequest {
@@ -44,4 +49,17 @@ message PublishCommandRequest {
 
 message PublishCommandResponse {
   bool accepted = 1;
+}
+
+message LinkSubscriberSessionRequest {
+  string radius_username = 1;
+  string calling_station_id = 2; // MAC address CPE dari RADIUS
+  string framed_ip_address = 3;
+  string pop = 4;
+  string event_type = 5; // "start" | "stop" | "interim-update"
+}
+
+message LinkSubscriberSessionResponse {
+  bool linked = 1;
+  string device_id = 2; // GenieACS device _id yang cocok, kosong jika tidak ditemukan
 }
