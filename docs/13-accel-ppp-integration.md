@@ -215,9 +215,23 @@ FreeRADIUS, tergantung berapa banyak service lain yang butuh akses serupa).
 - `radius-db` (Postgres) di `data-net` (internal-only), sama seperti `mongodb`/`redis` — tidak pernah ada rute ke internet.
 - CLI/telnet accel-ppp di PoP dibatasi `127.0.0.1` saja (default aman), akses jarak jauh untuk debug lewat SSH+WireGuard, bukan expose telnet.
 
-## Yang Belum Dikerjakan (Langkah Berikutnya)
+## Status Implementasi
 
-1. Build image Docker accel-ppp (untuk mode L2TP/SSTP cloud-deployable — PPPoE/IPoE tetap bare-metal di PoP).
-2. Tulis `freeradius/raddb/` lengkap (saat ini baru cuplikan `clients.conf`+`sql`) dan schema Postgres `radacct`.
-3. Implementasi endpoint `POST /v1/radius/accounting` di `grpc-server` + RPC `LinkSubscriberSession`.
-4. Tambah WireGuard peer untuk PoP pertama begitu ada PoP sungguhan untuk dites end-to-end.
+- [x] **RPC `LinkSubscriberSession`** — sudah diimplementasi penuh di `grpc-server`
+  (`internal/store/mongo.go`), termasuk pencarian device by MAC (dengan fallback
+  beberapa path TR-098/TR-181, plus Virtual Parameter seragam
+  `genieacs/examples/virtual-parameter-mac-address.js`) dan upsert ke koleksi
+  `subscriber_links`. **Sudah diuji end-to-end** di AKSES-VPS: MAC cocok →
+  `linked=true` + `device_id` terisi; MAC tidak cocok → `linked=false`; kedua
+  kasus ter-upsert benar ke MongoDB (`$setOnInsert` untuk `linked_at`, `$set`
+  untuk field lain).
+- [x] Role MongoDB least-privilege `grpcServerRole` (find `devices`,
+  find/insert/update `subscriber_links` saja) — diterapkan baik di
+  `mongodb/init/01-create-users.js` (deployment baru) maupun live di instance
+  yang sedang jalan.
+- [ ] Endpoint `POST /v1/radius/accounting` (REST) untuk dipanggil `rlm_rest`
+  FreeRADIUS — saat ini baru RPC gRPC native yang sudah bisa dipanggil
+  (via gRPC-Gateway jika perlu REST, lihat `nginx/conf.d/api.domain.com.conf`).
+- [ ] Build image Docker accel-ppp (mode L2TP/SSTP cloud-deployable — PPPoE/IPoE tetap bare-metal di PoP).
+- [ ] Tulis `freeradius/raddb/` lengkap (saat ini baru cuplikan `clients.conf`) dan schema Postgres `radacct`.
+- [ ] Tambah WireGuard peer untuk PoP pertama begitu ada PoP sungguhan untuk dites end-to-end.

@@ -23,6 +23,7 @@ import (
 	"github.com/warungbudina/akses-vps/grpc-server/internal/config"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/middleware"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/server"
+	"github.com/warungbudina/akses-vps/grpc-server/internal/store"
 	"github.com/warungbudina/akses-vps/grpc-server/pkg/logger"
 )
 
@@ -38,6 +39,21 @@ func main() {
 	log := logger.New(cfg.LogLevel, cfg.LogFormat)
 
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret, cfg.JWTIssuer, 24*time.Hour)
+
+	var mongoStore *store.MongoStore
+	if cfg.MongoURI != "" {
+		connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ms, err := store.NewMongoStore(connectCtx, cfg.MongoURI)
+		cancel()
+		if err != nil {
+			log.Error("failed to connect to mongodb, LinkSubscriberSession will be unavailable", "error", err)
+		} else {
+			mongoStore = ms
+			log.Info("connected to mongodb")
+		}
+	} else {
+		log.Warn("MONGO_URI not set, LinkSubscriberSession will be unavailable")
+	}
 
 	unaryInterceptors := []grpc.UnaryServerInterceptor{
 		middleware.UnaryLoggingInterceptor(),
@@ -62,7 +78,7 @@ func main() {
 		log.Info("grpc TLS disabled (expecting TLS termination upstream, e.g. nginx)")
 	}
 
-	grpcServer, health := server.NewGRPCServer(unaryInterceptors, serverOpts...)
+	grpcServer, health := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
 
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(cfg.GRPCPort))
 	if err != nil {
@@ -122,6 +138,13 @@ func main() {
 	}
 
 	_ = httpServer.Shutdown(shutdownCtx)
+
+	if mongoStore != nil {
+		if err := mongoStore.Close(shutdownCtx); err != nil {
+			log.Warn("error closing mongodb connection", "error", err)
+		}
+	}
+
 	log.Info("shutdown complete")
 }
 

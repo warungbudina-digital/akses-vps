@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
+	"github.com/warungbudina/akses-vps/grpc-server/internal/store"
 	devicev1 "github.com/warungbudina/akses-vps/grpc-server/proto/gen"
 )
 
@@ -19,11 +20,12 @@ import (
 type deviceServiceServer struct {
 	devicev1.UnimplementedDeviceServiceServer
 
+	store *store.MongoStore
 	// genieACSClient, mqttPublisher, dst. — disuntik dari main.go
 }
 
-func NewDeviceServiceServer() devicev1.DeviceServiceServer {
-	return &deviceServiceServer{}
+func NewDeviceServiceServer(mongoStore *store.MongoStore) devicev1.DeviceServiceServer {
+	return &deviceServiceServer{store: mongoStore}
 }
 
 func (s *deviceServiceServer) ListDevices(ctx context.Context, req *devicev1.ListDevicesRequest) (*devicev1.ListDevicesResponse, error) {
@@ -56,28 +58,55 @@ func (s *deviceServiceServer) LinkSubscriberSession(ctx context.Context, req *de
 	if req.GetRadiusUsername() == "" || req.GetCallingStationId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "radius_username and calling_station_id are required")
 	}
-	// TODO: query devices koleksi GenieACS by MAC (calling_station_id), lalu
-	// upsert subscriber_links{_id: radius_username, device_id, pop, status}
+	if s.store == nil {
+		return nil, status.Error(codes.Unavailable, "mongo store not configured")
+	}
+
+	deviceID, found, err := s.store.FindDeviceByMAC(ctx, req.GetCallingStationId())
+	if err != nil {
+		slog.Error("link_subscriber_session_lookup_failed", "mac", req.GetCallingStationId(), "error", err)
+		return nil, status.Error(codes.Internal, "failed to look up device by MAC")
+	}
+
+	statusVal := "active"
+	if req.GetEventType() == "stop" {
+		statusVal = "disconnected"
+	}
+
+	if err := s.store.UpsertSubscriberLink(ctx, store.SubscriberLink{
+		RadiusUsername:   req.GetRadiusUsername(),
+		DeviceID:         deviceID,
+		CallingStationID: req.GetCallingStationId(),
+		FramedIPAddress:  req.GetFramedIpAddress(),
+		Pop:              req.GetPop(),
+		Status:           statusVal,
+	}); err != nil {
+		slog.Error("link_subscriber_session_upsert_failed", "username", req.GetRadiusUsername(), "error", err)
+		return nil, status.Error(codes.Internal, "failed to persist subscriber link")
+	}
+
 	slog.Info("link_subscriber_session",
 		"username", req.GetRadiusUsername(),
 		"mac", req.GetCallingStationId(),
 		"pop", req.GetPop(),
 		"event", req.GetEventType(),
+		"device_found", found,
+		"device_id", deviceID,
 	)
-	return &devicev1.LinkSubscriberSessionResponse{Linked: false, DeviceId: ""}, nil
+	return &devicev1.LinkSubscriberSessionResponse{Linked: found, DeviceId: deviceID}, nil
 }
 
 // NewGRPCServer merangkai gRPC server dengan seluruh interceptor (logging,
 // metrics, auth), health service, dan reflection (untuk debugging via
 // grpcurl — sebaiknya dimatikan di production murni lewat env flag).
 // extraOpts dipakai untuk menyuntik grpc.Creds(...) (TLS) bila diaktifkan.
-func NewGRPCServer(unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer) {
+func NewGRPCServer(mongoStore *store.MongoStore, unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer) {
 	opts := append([]grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}, extraOpts...)
 	s := grpc.NewServer(opts...)
 
-	devicev1.RegisterDeviceServiceServer(s, NewDeviceServiceServer())
+	devicev1.RegisterDeviceServiceServer(s, NewDeviceServiceServer(mongoStore))
 
 	health := NewHealthServer()
 	healthpb.RegisterHealthServer(s, health)
