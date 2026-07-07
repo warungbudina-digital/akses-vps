@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -27,6 +29,16 @@ import (
 	"github.com/warungbudina/akses-vps/grpc-server/pkg/logger"
 )
 
+// mongoConnectRetryInitial/Max control the backoff for reconnecting to
+// MongoDB in the background when it isn't reachable at startup — doubles
+// each attempt up to the max. Kept short at the low end because the common
+// case (see docs/13-accel-ppp-integration.md race) is mongo finishing its
+// own init a few seconds after grpc-server starts on a full-stack restart.
+const (
+	mongoConnectRetryInitial = 2 * time.Second
+	mongoConnectRetryMax     = 30 * time.Second
+)
+
 func main() {
 	// Mode "-healthcheck": dipanggil oleh Docker/RouterOS container HEALTHCHECK.
 	// Image runtime pakai distroless (tanpa shell/curl/wget), jadi self-check
@@ -40,15 +52,33 @@ func main() {
 
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret, cfg.JWTIssuer, 24*time.Hour)
 
+	// ctx is created here (rather than right before the serve loop, as
+	// before) so the mongo background-retry goroutine below can share it
+	// and exit cleanly on shutdown instead of retrying forever.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// mongoStoreRef is the live store, if any. Read by the shutdown path to
+	// Close() whichever store ended up connected — the initial one, or one
+	// obtained later by the retry goroutine.
+	var mongoStoreRef atomic.Pointer[store.MongoStore]
 	var mongoStore *store.MongoStore
 	if cfg.MongoURI != "" {
-		connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		ms, err := store.NewMongoStore(connectCtx, cfg.MongoURI)
 		cancel()
 		if err != nil {
-			log.Error("failed to connect to mongodb, LinkSubscriberSession will be unavailable", "error", err)
+			// Not fatal: this reproducibly happens on a full-stack restart,
+			// since docker-compose's depends_on only waits for the mongodb
+			// container to start, not for mongod to actually be accepting
+			// connections yet. Serve everything else now and keep retrying
+			// mongo in the background instead of leaving
+			// LinkSubscriberSession permanently unavailable until someone
+			// manually restarts this container.
+			log.Warn("failed to connect to mongodb on startup, will retry in background; LinkSubscriberSession unavailable until then", "error", err)
 		} else {
 			mongoStore = ms
+			mongoStoreRef.Store(ms)
 			log.Info("connected to mongodb")
 		}
 	} else {
@@ -78,7 +108,11 @@ func main() {
 		log.Info("grpc TLS disabled (expecting TLS termination upstream, e.g. nginx)")
 	}
 
-	grpcServer, health := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
+	grpcServer, health, deviceStoreSetter := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
+
+	if mongoStore == nil && cfg.MongoURI != "" {
+		go retryMongoConnect(ctx, cfg.MongoURI, &mongoStoreRef, deviceStoreSetter, log)
+	}
 
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(cfg.GRPCPort))
 	if err != nil {
@@ -98,9 +132,6 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Info("grpc server starting", "port", cfg.GRPCPort)
@@ -139,13 +170,45 @@ func main() {
 
 	_ = httpServer.Shutdown(shutdownCtx)
 
-	if mongoStore != nil {
-		if err := mongoStore.Close(shutdownCtx); err != nil {
+	if ms := mongoStoreRef.Load(); ms != nil {
+		if err := ms.Close(shutdownCtx); err != nil {
 			log.Warn("error closing mongodb connection", "error", err)
 		}
 	}
 
 	log.Info("shutdown complete")
+}
+
+// retryMongoConnect keeps attempting to connect to MongoDB with exponential
+// backoff until it succeeds or ctx is cancelled (shutdown). On success it
+// injects the store into the running gRPC server via setter, so
+// LinkSubscriberSession recovers without restarting the container — see the
+// startup race this fixes in main()'s initial connect attempt above.
+func retryMongoConnect(ctx context.Context, uri string, ref *atomic.Pointer[store.MongoStore], setter server.StoreSetter, log *slog.Logger) {
+	backoff := mongoConnectRetryInitial
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ms, err := store.NewMongoStore(connectCtx, uri)
+		cancel()
+		if err != nil {
+			log.Warn("mongodb reconnect attempt failed", "error", err, "next_retry_in", backoff)
+			if backoff *= 2; backoff > mongoConnectRetryMax {
+				backoff = mongoConnectRetryMax
+			}
+			continue
+		}
+
+		ref.Store(ms)
+		setter.SetStore(ms)
+		log.Info("connected to mongodb (recovered via background retry)")
+		return
+	}
 }
 
 func runHealthcheckProbe() {
