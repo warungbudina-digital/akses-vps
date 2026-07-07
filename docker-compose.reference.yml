@@ -10,8 +10,6 @@
 #     docs/11-deployment-recommendations.md) dengan CHR hanya sebagai
 #     router/firewall edge di depan host Docker.
 # =====================================================================
-version: "3.9"
-
 networks:
   edge-net:
     driver: bridge
@@ -96,6 +94,8 @@ services:
       REDIS_ADDR: "redis:6379"
       MONGO_URI: "mongodb://grpc_readonly:${GRPC_MONGO_PASSWORD}@mongodb:27017/genieacs?authSource=genieacs"
       MQTT_BROKER_URL: "tcp://mosquitto:1883"
+      MQTT_USERNAME: "grpc-service"
+      MQTT_PASSWORD: "${MQTT_PASSWORD}"
     healthcheck:
       test: ["CMD", "/app/grpc-server", "-healthcheck"]
       interval: 30s
@@ -115,43 +115,47 @@ services:
     security_opt: ["no-new-privileges:true"]
 
   genieacs-cwmp:
-    image: genieacs/genieacs:1.2-slim
+    build: ./genieacs
     command: ["genieacs-cwmp"]
     restart: unless-stopped
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
     security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
     depends_on: [mongodb, redis]
 
   genieacs-nbi:
-    image: genieacs/genieacs:1.2-slim
+    build: ./genieacs
     command: ["genieacs-nbi"]
     restart: unless-stopped
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
     security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
     depends_on: [mongodb, redis]
 
   genieacs-fs:
-    image: genieacs/genieacs:1.2-slim
+    build: ./genieacs
     command: ["genieacs-fs"]
     restart: unless-stopped
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
     security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
     depends_on: [mongodb]
 
   genieacs-ui:
-    image: genieacs/genieacs:1.2-slim
+    build: ./genieacs
     command: ["genieacs-ui"]
     restart: unless-stopped
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
     security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
     depends_on: [genieacs-nbi]
 
   # -------------------- Data --------------------
@@ -193,6 +197,7 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
+    profiles: ["monitoring"]
 
   grafana:
     image: grafana/grafana:latest
@@ -204,6 +209,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+    profiles: ["monitoring"]
 
   loki:
     image: grafana/loki:latest
@@ -213,6 +219,7 @@ services:
       - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki
     command: ["-config.file=/etc/loki/local-config.yaml"]
+    profiles: ["monitoring"]
 
   promtail:
     image: grafana/promtail:latest
@@ -223,3 +230,4 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     command: ["-config.file=/etc/promtail/config.yml"]
+    profiles: ["monitoring"]
