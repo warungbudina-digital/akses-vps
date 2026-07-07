@@ -1,0 +1,44 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: "akses-vps"
+
+scrape_configs:
+  - job_name: "grpc-server"
+    static_configs:
+      - targets: ["grpc-server:8443"]
+    metrics_path: /metrics
+
+  - job_name: "nginx"
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+
+  - job_name: "mongodb"
+    static_configs:
+      - targets: ["mongodb-exporter:9216"]
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  - job_name: "mosquitto"
+    static_configs:
+      - targets: ["mosquitto-exporter:9234"]
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# Catatan: exporter (nginx-exporter, mongodb-exporter, redis-exporter,
+# mosquitto-exporter, node-exporter, cadvisor) adalah container sidecar
+# tambahan opsional — tambahkan ke docker-compose.reference.yml /
+# routeros-chr.rsc sesuai kebutuhan. Semuanya join `obs-net` saja.

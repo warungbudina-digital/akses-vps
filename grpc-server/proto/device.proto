@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package device.v1;
+
+option go_package = "github.com/warungbudina/akses-vps/grpc-server/proto/gen;devicev1";
+
+// DeviceService — jembatan antara sistem eksternal dan GenieACS/MQTT.
+// Endpoint yang benar-benar menyentuh GenieACS/Mongo dijaga JWT + API key
+// internal, ditegakkan lewat interceptor (lihat internal/middleware/auth.go).
+service DeviceService {
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc GetDevice(GetDeviceRequest) returns (Device);
+  rpc PublishCommand(PublishCommandRequest) returns (PublishCommandResponse);
+}
+
+message ListDevicesRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListDevicesResponse {
+  repeated Device devices = 1;
+  string next_page_token = 2;
+}
+
+message GetDeviceRequest {
+  string device_id = 1;
+}
+
+message Device {
+  string device_id = 1;
+  string serial_number = 2;
+  string manufacturer = 3;
+  string product_class = 4;
+  int64 last_inform_unix = 5;
+  string status = 6;
+}
+
+message PublishCommandRequest {
+  string device_id = 1;
+  string topic = 2;
+  bytes payload = 3;
+}
+
+message PublishCommandResponse {
+  bool accepted = 1;
+}

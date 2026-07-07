@@ -1,0 +1,66 @@
+package middleware
+
+import (
+	"context"
+	"strings"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+
+	"github.com/warungbudina/akses-vps/grpc-server/internal/auth"
+)
+
+// publicMethods = daftar RPC yang tidak butuh auth (health check via gRPC
+// health protocol ditangani terpisah, bukan lewat interceptor ini).
+var publicMethods = map[string]bool{
+	"/grpc.health.v1.Health/Check": true,
+	"/grpc.health.v1.Health/Watch": true,
+}
+
+// UnaryAuthInterceptor menegakkan salah satu dari:
+//   - Bearer JWT valid di metadata "authorization"
+//   - Internal API key di metadata "x-internal-api-key" (untuk service-to-service)
+func UnaryAuthInterceptor(jwtManager *auth.JWTManager, internalAPIKey string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		if publicMethods[info.FullMethod] {
+			return handler(ctx, req)
+		}
+
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, status.Error(codes.Unauthenticated, "missing metadata")
+		}
+
+		if keys := md.Get("x-internal-api-key"); len(keys) > 0 {
+			if auth.VerifyInternalAPIKey(keys[0], internalAPIKey) {
+				return handler(ctx, req)
+			}
+			return nil, status.Error(codes.PermissionDenied, "invalid internal api key")
+		}
+
+		authHeader := md.Get("authorization")
+		if len(authHeader) == 0 {
+			return nil, status.Error(codes.Unauthenticated, "missing authorization header")
+		}
+
+		token := strings.TrimPrefix(authHeader[0], "Bearer ")
+		claims, err := jwtManager.Verify(token)
+		if err != nil {
+			return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+		}
+
+		ctx = context.WithValue(ctx, ctxKeySubject{}, claims.Subject)
+		ctx = context.WithValue(ctx, ctxKeyScope{}, claims.Scope)
+		return handler(ctx, req)
+	}
+}
+
+type ctxKeySubject struct{}
+type ctxKeyScope struct{}
+
+func SubjectFromContext(ctx context.Context) (string, bool) {
+	v, ok := ctx.Value(ctxKeySubject{}).(string)
+	return v, ok
+}

@@ -1,0 +1,23 @@
+# Secrets
+.env
+genieacs/genieacs.env
+mosquitto/config/passwd
+
+# Runtime data (persistent volumes when running compose locally / bind mounts)
+mosquitto/data/
+mosquitto/log/
+mongodb/data/
+backup/output/
+
+# Generated
+grpc-server/proto/gen/
+grpc-server/bin/
+
+# Go
+*.exe
+*.test
+*.out
+
+# OS/editor
+.DS_Store
+*.swp

@@ -1,0 +1,37 @@
+# Nilai default — SEMUA field ini di-override lewat Environment Variable
+# di production (lihat internal/config/config.go). File ini hanya referensi
+# lokal untuk development.
+
+server:
+  grpc_port: 50051
+  http_port: 8443          # health/metrics/REST gateway
+  tls_cert_file: ""        # kosong = TLS off (dipakai di belakang nginx internal)
+  tls_key_file: ""
+  shutdown_timeout_seconds: 15
+
+auth:
+  jwt_secret: "CHANGE_ME"
+  jwt_issuer: "akses-vps"
+  internal_api_key: "CHANGE_ME_INTERNAL_KEY"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+
+mongo:
+  uri: "mongodb://grpc_readonly:CHANGE_ME@mongodb:27017/genieacs?authSource=genieacs"
+
+mqtt:
+  broker_url: "tcp://mosquitto:1883"
+  username: "grpc-service"
+  password: "CHANGE_ME"
+  client_id: "grpc-server"
+
+log:
+  level: "info"
+  format: "json"
+
+telemetry:
+  otel_exporter_otlp_endpoint: ""   # kosong = tracer no-op, isi untuk aktifkan OTLP
+  service_name: "grpc-server"

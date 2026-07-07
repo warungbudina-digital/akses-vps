@@ -1,0 +1,2 @@
+# Jalankan backup harian jam 02:00 server time, log ke file terpisah
+0 2 * * * root BACKUP_ROOT=/opt/backups/akses-vps RETENTION_DAYS=14 /opt/akses-vps/backup/backup.sh >> /var/log/akses-vps-backup.log 2>&1

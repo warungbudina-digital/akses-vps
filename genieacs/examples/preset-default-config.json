@@ -1,0 +1,10 @@
+{
+  "_id": "default-config",
+  "weight": 0,
+  "precondition": "[[\"Events.Boot\", \"=\", true]]",
+  "provision": "set-wifi",
+  "events": {
+    "0 BOOTSTRAP": true,
+    "1 BOOT": true
+  }
+}
