@@ -1,0 +1,40 @@
+# akses-vps custom module instance - see docs/13-accel-ppp-integration.md.
+# Calls grpc-server's POST /v1/radius/accounting webhook
+# (internal/server/http_radius_accounting.go) on every Accounting-Start/
+# Stop/Interim-Update, to correlate the RADIUS session with a GenieACS
+# device. Deliberately a SEPARATE named instance from the generic `rest`
+# module (mods-available/rest) rather than editing that one, so this is
+# self-contained and doesn't affect any other REST use in future.
+#
+# Two startup-blocking behaviors of rlm_rest are deliberately avoided here
+# (both discovered live while wiring this up, same class of bug as the
+# grpc-server<->mongo startup race fixed earlier):
+#   1. No top-level `connect_uri` is set - that triggers a pre-flight
+#      reachability check at daemon startup that makes radiusd refuse to
+#      start entirely if the target is unreachable yet.
+#   2. `pool.start = 0` / `pool.min = 0` - by default a module's pool
+#      pre-opens `${thread[pool].start_servers}` connections at
+#      instantiation and refuses to start if it can't. With this at 0,
+#      connections are opened lazily on first real accounting request
+#      instead, so freeradius starts fine even if grpc-server isn't up yet
+#      (e.g. on a full-stack restart).
+rest radius_accounting {
+	pool {
+		start = 0
+		min   = 0
+	}
+
+	accounting {
+		uri    = "http://grpc-server:8443/v1/radius/accounting"
+		method = 'post'
+		body   = 'json'
+		# Flat JSON matching LinkSubscriberSessionRequest's field names
+		# exactly (grpc-server decodes straight into the proto struct,
+		# see http_radius_accounting.go) rather than rlm_rest's default
+		# verbose per-attribute JSON encoding. %{escape:...} guards
+		# against a User-Name/MAC containing a literal '"' breaking the
+		# JSON structure - rlm_expr's escape xlat is already enabled by
+		# default (mods-enabled/expr).
+		data = "{\"radius_username\":\"%{escape:%{User-Name}}\",\"calling_station_id\":\"%{escape:%{Calling-Station-Id}}\",\"framed_ip_address\":\"%{escape:%{Framed-IP-Address}}\",\"pop\":\"%{escape:%{NAS-Identifier}}\",\"event_type\":\"%{escape:%{Acct-Status-Type}}\"}"
+	}
+}

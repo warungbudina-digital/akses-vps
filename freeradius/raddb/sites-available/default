@@ -760,6 +760,25 @@ accounting {
 	-sql
 
 	#
+	#  akses-vps: correlate this accounting event to a GenieACS device via
+	#  grpc-server's webhook (docs/13-accel-ppp-integration.md,
+	#  mods-available/rest_radius_accounting). "-" prefix so a webhook
+	#  failure/timeout doesn't block the Accounting-Response back to the
+	#  NAS - this is best-effort device correlation, not part of the core
+	#  AAA contract, and accel-ppp should never be blocked by it.
+	#
+	# $ENV{} (not %env()/%{env:}, both wrong - confirmed live: the first is
+	# a parse error, "Unknown module"; the second silently expands to
+	# garbage since %e is a legacy single-char escape, not a function call)
+	# is conf-file-parse-time substitution, same mechanism proven working
+	# for mods-available/sql's password field. It works here too since
+	# virtual-server files use the same conf-file parser as module config.
+	update control {
+		&REST-HTTP-Header := "X-Internal-Api-Key: $ENV{INTERNAL_API_KEY}"
+	}
+	-radius_accounting
+
+	#
 	#  If you receive stop packets with zero session length,
 	#  they will NOT be logged in the database.  The SQL module
 	#  will print a message (only in debugging mode), and will

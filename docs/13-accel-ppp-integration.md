@@ -241,16 +241,47 @@ FreeRADIUS, tergantung berapa banyak service lain yang butuh akses serupa).
   401 tanpa/salah API key, 400 kalau field wajib kosong, 405 kalau bukan
   POST, 200 + upsert `subscriber_links` yang benar untuk request valid
   (dites lewat curl dari container lain di `app-net`, bukan cuma dari
-  grpc-server sendiri). **Belum dites**: FreeRADIUS `rlm_rest` module itu
-  sendiri belum dikonfigurasi untuk memanggil endpoint ini (perlu
-  `freeradius/raddb/mods-available/rest` + hook di `sites-enabled/default`
-  bagian `accounting {}`) — dan jaringan `radius-net` freeradius saat ini
-  terisolasi dari `app-net`/`data-net` tempat grpc-server berada, jadi perlu
-  ditambahkan ke satu network yang sama dulu sebelum FreeRADIUS bisa benar2
-  reach endpoint ini.
+  grpc-server sendiri).
+- [x] **`rlm_rest` FreeRADIUS benar-benar terhubung ke endpoint di atas** —
+  instance module baru `mods-available/rest_radius_accounting` (bukan edit
+  `mods-available/rest` yang generic), di-hook ke `accounting {}` di
+  `sites-available/default` dengan prefix `-` (kegagalan webhook tidak
+  memblokir Accounting-Response ke NAS). `freeradius` ditambahkan ke
+  `app-net` (dulu cuma `radius-net`, terisolasi dari grpc-server) supaya
+  bisa resolve `grpc-server` via Docker DNS. Dua bug nyata ketemu & fix
+  sebelum ini jalan:
+  1. `pool.start`/`pool.min` module `rest` defaultnya bukan 0 — kalau
+     dibiarkan, freeradius **menolak start sama sekali** kalau grpc-server
+     belum reachable saat boot (kelas bug yang sama dengan race
+     grpc-server<->mongo yang sudah diperbaiki sebelumnya). Set ke 0 +
+     tidak set `connect_uri` top-level (yang punya pre-flight reachability
+     check sendiri) supaya koneksi dibuka lazy saat request pertama.
+  2. Xlat untuk baca environment variable (`INTERNAL_API_KEY` buat header
+     `X-Internal-Api-Key`) - dua sintaks yang saya kira benar ternyata
+     salah, dites langsung lewat `radiusd -X`: `%{env:...}` → parse error
+     "Unknown module"; `%env(...)` → diam-diam expand jadi string sampah
+     (`%e` ternyata legacy single-char escape, bukan function call). Yang
+     benar-benar jalan: `$ENV{...}` (mekanisme conf-file-parse-time yang
+     sama seperti `mods-available/sql`'s password field), dipakai di dalam
+     blok `update control {}`.
+  Diverifikasi end-to-end **sungguhan** (bukan cuma curl manual ke
+  grpc-server): `radclient` mensimulasikan Accounting-Start dan -Stop
+  asli dari accel-ppp lewat `10.66.66.1:1813`, lolos FreeRADIUS penuh
+  (SQL logging + webhook), grpc-server menerima dengan `X-Internal-Api-Key`
+  yang benar (200 OK), `subscriber_links` di MongoDB ter-upsert dengan
+  `status` yang benar (`active` untuk Start, `disconnected` untuk Stop —
+  ini juga membuktikan fix case-sensitivity `event_type` di grpc-server
+  bekerja terhadap value asli FreeRADIUS: `%{Acct-Status-Type}` expand ke
+  `"Start"`/`"Stop"` dengan huruf besar, bukan huruf kecil). Dites baik di
+  instance debug (`freeradius -X`) maupun di container produksi yang
+  sebenarnya jalan.
 - [ ] Build image Docker accel-ppp (mode L2TP/SSTP cloud-deployable — PPPoE/IPoE tetap bare-metal di PoP).
 - [x] `freeradius/raddb/` lengkap (default tree penuh dari image resmi + `mods-enabled/sql`
   aktif ke Postgres `radius-db`) dan schema Postgres `radacct`/`radcheck`/`radreply`/dst
   ter-load — dideploy dan diverifikasi live dengan `radtest`/`radclient` (Access-Accept/
   Reject + accounting keduanya round-trip lewat Postgres dengan benar).
 - [ ] Tambah WireGuard peer untuk PoP pertama begitu ada PoP sungguhan untuk dites end-to-end.
+  **Catatan**: pipa lengkap PoP→cloud (accel-ppp→FreeRADIUS→grpc-server→MongoDB) sekarang
+  sudah terbukti berfungsi sampai ke FreeRADIUS; yang tersisa murni soal menghubungkan PoP
+  fisik sungguhan (WireGuard peer + `clients.conf` secret per-PoP, ganti dari
+  placeholder `CHANGE_ME_PER_POP_SECRET`), bukan lagi soal kelengkapan software di cloud.

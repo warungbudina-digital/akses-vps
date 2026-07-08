@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 
 	"google.golang.org/grpc"
@@ -100,8 +101,13 @@ func (s *deviceServiceServer) LinkSubscriberSession(ctx context.Context, req *de
 		return nil, status.Error(codes.Internal, "failed to look up device by MAC")
 	}
 
+	// EqualFold, not ==: FreeRADIUS's %{Acct-Status-Type} xlat (the source
+	// for this field once rlm_rest is wired up, see docs/13) expands to the
+	// dictionary VALUE name verbatim - "Stop", not "stop" - so an exact
+	// match here would silently never fire and every session would stay
+	// marked "active" forever, including real disconnects.
 	statusVal := "active"
-	if req.GetEventType() == "stop" {
+	if strings.EqualFold(req.GetEventType(), "stop") {
 		statusVal = "disconnected"
 	}
 

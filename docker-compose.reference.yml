@@ -230,11 +230,14 @@ services:
     # "radius-db" by name (this is what the old 127.0.0.1-publish hack on
     # radius-db was working around, before discovering that approach is
     # dead anyway per radius-net's comment above).
-    networks: [radius-net]
+    # Also on app-net (same as grpc-server) so rlm_rest can reach
+    # "grpc-server:8443/v1/radius/accounting" by Docker DNS - radius-net
+    # alone doesn't overlap with any network grpc-server is on.
+    networks: [radius-net, app-net]
     ports:
       - "10.66.66.1:1812:1812/udp"   # RADIUS auth
       - "10.66.66.1:1813:1813/udp"   # RADIUS accounting
-    env_file: [.env]   # RADIUS_DB_PASSWORD, read via $ENV{} in mods-available/sql - never written in plaintext to a tracked config file
+    env_file: [.env]   # RADIUS_DB_PASSWORD + INTERNAL_API_KEY, read via $ENV{} in module configs - never written in plaintext to a tracked config file
     volumes:
       # NOTE: mount at /etc/freeradius, NOT /etc/raddb. /etc/raddb inside
       # this image is only a symlink to /etc/freeradius kept for CLI-tool
@@ -244,7 +247,7 @@ services:
       # --entrypoint cat ... /docker-entrypoint.sh` + radiusd.conf's
       # `raddbdir = /etc/freeradius`).
       - ./freeradius/raddb:/etc/freeradius:ro
-    depends_on: [radius-db]
+    depends_on: [radius-db, grpc-server]
 
   # -------------------- Observability --------------------
   prometheus:
