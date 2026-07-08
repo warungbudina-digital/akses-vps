@@ -1,6 +1,8 @@
 // Command server adalah entrypoint grpc-server: gRPC di :50051 (h2, TLS
 // opsional — biasanya TLS di-terminate di nginx dan link internal plain h2c),
-// HTTP di :8443 untuk /healthz dan /metrics (Prometheus).
+// HTTP di :8443 untuk /healthz, /metrics (Prometheus), dan
+// /v1/radius/accounting (webhook FreeRADIUS rlm_rest, lihat
+// internal/server/http_radius_accounting.go).
 package main
 
 import (
@@ -108,10 +110,10 @@ func main() {
 		log.Info("grpc TLS disabled (expecting TLS termination upstream, e.g. nginx)")
 	}
 
-	grpcServer, health, deviceStoreSetter := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
+	grpcServer, health, deviceSvc := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
 
 	if mongoStore == nil && cfg.MongoURI != "" {
-		go retryMongoConnect(ctx, cfg.MongoURI, &mongoStoreRef, deviceStoreSetter, log)
+		go retryMongoConnect(ctx, cfg.MongoURI, &mongoStoreRef, deviceSvc, log)
 	}
 
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(cfg.GRPCPort))
@@ -120,13 +122,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ---- HTTP server: healthz + metrics ----
+	// ---- HTTP server: healthz + metrics + radius accounting webhook ----
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/v1/radius/accounting", server.RadiusAccountingHandler(deviceSvc, cfg.InternalAPIKey))
 	httpServer := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.HTTPPort),
 		Handler:           mux,

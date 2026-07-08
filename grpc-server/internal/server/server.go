@@ -23,6 +23,17 @@ type StoreSetter interface {
 	SetStore(mongoStore *store.MongoStore)
 }
 
+// DeviceService is what main.go holds onto after NewGRPCServer: the gRPC
+// server registers it directly, but main.go also needs to call
+// LinkSubscriberSession itself, from the REST /v1/radius/accounting handler
+// (see http_radius_accounting.go) - FreeRADIUS's rlm_rest module speaks
+// HTTP, not gRPC, so that endpoint is a thin wrapper reusing this same
+// implementation rather than a second one.
+type DeviceService interface {
+	devicev1.DeviceServiceServer
+	StoreSetter
+}
+
 // deviceServiceServer implementasi RPC yang didefinisikan di proto/device.proto.
 // Detail integrasi ke GenieACS NBI / MQTT publisher disuntik lewat field,
 // bukan hard-coded, supaya gampang di-mock saat unit test.
@@ -121,7 +132,7 @@ func (s *deviceServiceServer) LinkSubscriberSession(ctx context.Context, req *de
 // metrics, auth), health service, dan reflection (untuk debugging via
 // grpcurl — sebaiknya dimatikan di production murni lewat env flag).
 // extraOpts dipakai untuk menyuntik grpc.Creds(...) (TLS) bila diaktifkan.
-func NewGRPCServer(mongoStore *store.MongoStore, unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer, StoreSetter) {
+func NewGRPCServer(mongoStore *store.MongoStore, unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer, DeviceService) {
 	opts := append([]grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}, extraOpts...)

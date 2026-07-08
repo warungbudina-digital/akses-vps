@@ -229,9 +229,28 @@ FreeRADIUS, tergantung berapa banyak service lain yang butuh akses serupa).
   find/insert/update `subscriber_links` saja) — diterapkan baik di
   `mongodb/init/01-create-users.js` (deployment baru) maupun live di instance
   yang sedang jalan.
-- [ ] Endpoint `POST /v1/radius/accounting` (REST) untuk dipanggil `rlm_rest`
-  FreeRADIUS — saat ini baru RPC gRPC native yang sudah bisa dipanggil
-  (via gRPC-Gateway jika perlu REST, lihat `nginx/conf.d/api.domain.com.conf`).
+- [x] Endpoint `POST /v1/radius/accounting` (REST) untuk dipanggil `rlm_rest`
+  FreeRADIUS — diimplementasi sebagai wrapper tipis di atas RPC
+  `LinkSubscriberSession` yang sudah ada (`internal/server/http_radius_accounting.go`),
+  bukan implementasi terpisah/gRPC-Gateway. Body request/response persis sama
+  dengan field proto (`radius_username`, `calling_station_id`,
+  `framed_ip_address`, `pop`, `event_type` / `linked`, `device_id`) karena
+  struct Go hasil generate proto sudah punya `json:` tag yang cocok. Auth
+  pakai header `X-Internal-Api-Key` (`INTERNAL_API_KEY`), sama seperti jalur
+  gRPC internal (lihat `internal/middleware/auth.go`). Diverifikasi live:
+  401 tanpa/salah API key, 400 kalau field wajib kosong, 405 kalau bukan
+  POST, 200 + upsert `subscriber_links` yang benar untuk request valid
+  (dites lewat curl dari container lain di `app-net`, bukan cuma dari
+  grpc-server sendiri). **Belum dites**: FreeRADIUS `rlm_rest` module itu
+  sendiri belum dikonfigurasi untuk memanggil endpoint ini (perlu
+  `freeradius/raddb/mods-available/rest` + hook di `sites-enabled/default`
+  bagian `accounting {}`) — dan jaringan `radius-net` freeradius saat ini
+  terisolasi dari `app-net`/`data-net` tempat grpc-server berada, jadi perlu
+  ditambahkan ke satu network yang sama dulu sebelum FreeRADIUS bisa benar2
+  reach endpoint ini.
 - [ ] Build image Docker accel-ppp (mode L2TP/SSTP cloud-deployable — PPPoE/IPoE tetap bare-metal di PoP).
-- [ ] Tulis `freeradius/raddb/` lengkap (saat ini baru cuplikan `clients.conf`) dan schema Postgres `radacct`.
+- [x] `freeradius/raddb/` lengkap (default tree penuh dari image resmi + `mods-enabled/sql`
+  aktif ke Postgres `radius-db`) dan schema Postgres `radacct`/`radcheck`/`radreply`/dst
+  ter-load — dideploy dan diverifikasi live dengan `radtest`/`radclient` (Access-Accept/
+  Reject + accounting keduanya round-trip lewat Postgres dengan benar).
 - [ ] Tambah WireGuard peer untuk PoP pertama begitu ada PoP sungguhan untuk dites end-to-end.
