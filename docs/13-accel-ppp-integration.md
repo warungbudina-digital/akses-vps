@@ -280,8 +280,20 @@ FreeRADIUS, tergantung berapa banyak service lain yang butuh akses serupa).
   aktif ke Postgres `radius-db`) dan schema Postgres `radacct`/`radcheck`/`radreply`/dst
   ter-load — dideploy dan diverifikasi live dengan `radtest`/`radclient` (Access-Accept/
   Reject + accounting keduanya round-trip lewat Postgres dengan benar).
-- [ ] Tambah WireGuard peer untuk PoP pertama begitu ada PoP sungguhan untuk dites end-to-end.
-  **Catatan**: pipa lengkap PoP→cloud (accel-ppp→FreeRADIUS→grpc-server→MongoDB) sekarang
-  sudah terbukti berfungsi sampai ke FreeRADIUS; yang tersisa murni soal menghubungkan PoP
-  fisik sungguhan (WireGuard peer + `clients.conf` secret per-PoP, ganti dari
-  placeholder `CHANGE_ME_PER_POP_SECRET`), bukan lagi soal kelengkapan software di cloud.
+- [x] Tambah WireGuard peer untuk PoP pertama (2026-07-08) — `[Peer]` block untuk
+  `pop1` (`AllowedIPs = 10.66.66.10/32`) sudah ditambahkan ke `wg0.conf` server dan
+  di-reload tanpa downtime (`wg syncconf`, tidak mengganggu peer `client1` yang
+  sudah ada). `freeradius/raddb/clients.conf`'s `pop1` sudah pakai secret RADIUS asli
+  (bukan `CHANGE_ME_PER_POP_SECRET` lagi). **Private key WireGuard + secret RADIUS
+  keduanya SENGAJA tidak disimpan di repo maupun tertinggal di VPS** setelah dibuat,
+  sesuai `docs/12` — hanya public key yang ada di `wg0.conf` (yang bukan rahasia).
+  Bundle setup (`pop1.conf` buat box PoP + potongan config `[radius]`/`[pppoe]`
+  accel-ppp) sudah disiapkan terpisah di luar repo untuk operator PoP 1 pakai
+  langsung, dengan instruksi cara reset kalau perlu regenerasi.
+  **Catatan**: pipa lengkap PoP→cloud (accel-ppp→FreeRADIUS→grpc-server→MongoDB)
+  sekarang sudah terbukti berfungsi sampai ke FreeRADIUS, dan slot koneksi PoP 1 di
+  sisi server (WireGuard peer + RADIUS client) sudah siap. Yang tersisa murni
+  menyiapkan **hardware PoP 1 sungguhan** (accel-ppp terpasang, isi
+  `nas-ip-address`/`gw-ip-address`/`interface` sesuai topologi riil PoP 1) dan
+  menyambungkannya pakai bundle di atas — bukan lagi soal kelengkapan software
+  di cloud sama sekali.
