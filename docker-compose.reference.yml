@@ -21,6 +21,20 @@ networks:
     internal: true   # tidak ada route keluar ke internet dari network ini
   obs-net:
     driver: bridge
+  # radius-db + freeradius only. NOT internal:true - freeradius must accept
+  # inbound RADIUS from real PoPs over WireGuard, and empirically (tested
+  # live 2026-07-08) Docker's port-publishing DNAT does not work AT ALL for
+  # any container whose only network is internal:true (host-side publish
+  # silently no-ops - confirmed via `ss -tlnp`/`docker port` showing
+  # nothing despite HostConfig.PortBindings looking correct). So this
+  # network can't be internal like data-net is. Trade-off: unlike
+  # mongodb/redis on data-net, a compromised radius-db here is not
+  # structurally prevented from reaching the internet - accepted for now
+  # since freeradius (same segment) already needs real outbound access
+  # (WireGuard-tunneled RADIUS to PoPs), revisit with a scoped egress
+  # firewall rule if this needs hardening further.
+  radius-net:
+    driver: bridge
 
 volumes:
   mongo-data:
@@ -191,21 +205,45 @@ services:
   radius-db:
     image: postgres:16-alpine
     restart: unless-stopped
-    networks: [data-net]
+    networks: [radius-net]   # see radius-net's comment above for why not data-net
     environment:
       POSTGRES_DB: radius
       POSTGRES_USER: radius
       POSTGRES_PASSWORD: ${RADIUS_DB_PASSWORD}
     volumes:
       - radius-db-data:/var/lib/postgresql/data
+      - ./freeradius/postgres-init:/docker-entrypoint-initdb.d:ro
     security_opt: ["no-new-privileges:true"]
 
   freeradius:
-    image: freeradius/freeradius-server:3.2
+    # NOTE: ":3.2" alone is not a published tag on this image (only
+    # 3.2.0..3.2.10 or "latest-3.2" exist) - pin to a real one, per the
+    # "pin every image" policy in docs/11-deployment-recommendations.md.
+    image: freeradius/freeradius-server:3.2.10
     restart: unless-stopped
-    network_mode: "host"   # wajib: harus bind persis ke IP WireGuard (10.66.66.1), bukan Docker bridge
+    # NOT network_mode: host (deviates from the original docs/13 design -
+    # see below). Reaches radius-db via normal Docker DNS on radius-net;
+    # its own RADIUS ports are published bound to the WireGuard host IP
+    # specifically (10.66.66.1), not host networking wholesale. This also
+    # sidesteps host networking's own problem: it would put freeradius in
+    # the host netns with NO Docker DNS at all, unable to resolve
+    # "radius-db" by name (this is what the old 127.0.0.1-publish hack on
+    # radius-db was working around, before discovering that approach is
+    # dead anyway per radius-net's comment above).
+    networks: [radius-net]
+    ports:
+      - "10.66.66.1:1812:1812/udp"   # RADIUS auth
+      - "10.66.66.1:1813:1813/udp"   # RADIUS accounting
+    env_file: [.env]   # RADIUS_DB_PASSWORD, read via $ENV{} in mods-available/sql - never written in plaintext to a tracked config file
     volumes:
-      - ./freeradius/raddb:/etc/raddb:ro
+      # NOTE: mount at /etc/freeradius, NOT /etc/raddb. /etc/raddb inside
+      # this image is only a symlink to /etc/freeradius kept for CLI-tool
+      # convenience - radiusd.conf's own compiled-in confdir is
+      # /etc/freeradius, so mounting at the symlink path gets silently
+      # shadowed/ignored by the running daemon (verified via `docker run
+      # --entrypoint cat ... /docker-entrypoint.sh` + radiusd.conf's
+      # `raddbdir = /etc/freeradius`).
+      - ./freeradius/raddb:/etc/freeradius:ro
     depends_on: [radius-db]
 
   # -------------------- Observability --------------------
