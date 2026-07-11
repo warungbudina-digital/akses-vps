@@ -41,8 +41,6 @@ volumes:
   redis-data:
   mosquitto-data:
   mosquitto-log:
-  letsencrypt-certs:
-  letsencrypt-www:
   prometheus-data:
   grafana-data:
   loki-data:
@@ -55,15 +53,16 @@ services:
     restart: unless-stopped
     networks: [edge-net, app-net]
     ports:
-      - "80:80"
-      - "443:443"
+      # 80/443 sengaja TIDAK di-publish lagi ke host - satu-satunya jalur
+      # publik untuk service di belakang nginx sekarang cloudflared (lihat
+      # service di bawah), yang menyambung ke sini via nama Docker network,
+      # bukan port host. 7547 tetap publik langsung untuk CPE yang tidak
+      # support SNI/TLS modern (lihat docs/04-tr069-request-flow.md).
       - "7547:7547"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
-      - letsencrypt-certs:/etc/letsencrypt:ro
-      - letsencrypt-www:/var/www/certbot:ro
     read_only: true
     tmpfs:
       - /var/cache/nginx
@@ -81,18 +80,25 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
-  certbot:
-    image: certbot/certbot:latest
+  cloudflared:
+    # Satu-satunya jalur publik ke nginx untuk 80/443 - hanya bikin koneksi
+    # keluar (outbound) ke edge Cloudflare, tidak ada port yang perlu
+    # di-publish/dst-nat sama sekali untuk service ini. TLS publik
+    # (acs/cwmp/fs/api.obc-crypto.com) ditangani sepenuhnya oleh Cloudflare
+    # edge - menggantikan certbot/Let's Encrypt yang sebelumnya dipakai di
+    # sini. Tunnel + ingress rule dikonfigurasi lewat Cloudflare API/dashboard,
+    # bukan file ini - token-nya saja yang di-mount lewat env.
+    image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    networks: [edge-net]
-    volumes:
-      - letsencrypt-certs:/etc/letsencrypt
-      - letsencrypt-www:/var/www/certbot
-      - ./certbot/renew-hook.sh:/renew-hook.sh:ro
-    entrypoint: >
-      /bin/sh -c "trap exit TERM; while :; do
-      certbot renew --webroot -w /var/www/certbot --deploy-hook /renew-hook.sh;
-      sleep 12h & wait $${!}; done"
+    networks: [edge-net, app-net]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN}"
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [nginx]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
 
   # -------------------- Application --------------------
   grpc-server:
@@ -126,7 +132,6 @@ services:
       - ./mosquitto/config:/mosquitto/config:ro
       - mosquitto-data:/mosquitto/data
       - mosquitto-log:/mosquitto/log
-      - letsencrypt-certs:/mosquitto/certs:ro
     security_opt: ["no-new-privileges:true"]
 
   genieacs-cwmp:
