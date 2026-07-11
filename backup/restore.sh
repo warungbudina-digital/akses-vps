@@ -13,11 +13,6 @@ docker exec mongodb mongorestore \
   --authenticationDatabase admin \
   --archive="/tmp/restore.archive" --gzip --drop
 
-echo "Restore Let's Encrypt certs..."
-LE_ARCHIVE=$(ls "${SRC}"/letsencrypt-*.tar.gz)
-docker run --rm -v letsencrypt-certs:/data -v "${SRC}:/backup" alpine \
-  sh -c "cd /data && tar xzf /backup/$(basename "${LE_ARCHIVE}")"
-
 echo "Restore Docker volumes lain (pilih manual sesuai kebutuhan):"
 ls "${SRC}"/volume-*.tar.gz
 echo "Contoh: docker run --rm -v <volume-name>:/data -v ${SRC}:/backup alpine sh -c 'cd /data && tar xzf /backup/volume-<name>-*.tar.gz'"

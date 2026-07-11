@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Backup harian: MongoDB, konfigurasi GenieACS, sertifikat Let's Encrypt,
-# konfigurasi MikroTik, dan seluruh Docker named volume.
+# Backup harian: MongoDB, konfigurasi GenieACS, konfigurasi MikroTik,
+# dan seluruh Docker named volume.
+#
+# Tidak lagi backup sertifikat TLS - sejak migrasi ke Cloudflare Tunnel,
+# TLS publik ditangani Cloudflare edge, tidak ada lagi sertifikat lokal
+# (Let's Encrypt/certbot) yang perlu di-backup di sini.
 #
 # Jadwalkan lewat cron (lihat backup/crontab.example) atau RouterOS scheduler
 # yang meng-exec container ini.
@@ -30,12 +34,7 @@ docker exec mongodb rm -f "/tmp/mongo-${DATE}.archive"
 echo "-> GenieACS config"
 tar czf "${DEST}/genieacs-config-${DATE}.tar.gz" genieacs/genieacs.env genieacs/examples 2>/dev/null || true
 
-# 3. Sertifikat Let's Encrypt
-echo "-> Let's Encrypt certs"
-docker run --rm -v letsencrypt-certs:/data -v "${DEST}:/backup" alpine \
-  tar czf "/backup/letsencrypt-${DATE}.tar.gz" -C /data .
-
-# 4. Konfigurasi MikroTik CHR (export penuh RouterOS config via API/SSH)
+# 3. Konfigurasi MikroTik CHR (export penuh RouterOS config via API/SSH)
 echo "-> MikroTik RouterOS config export"
 if [ -n "${MIKROTIK_HOST:-}" ]; then
   ssh -o StrictHostKeyChecking=accept-new "${MIKROTIK_SSH_USER}@${MIKROTIK_HOST}" \
@@ -43,20 +42,20 @@ if [ -n "${MIKROTIK_HOST:-}" ]; then
   scp "${MIKROTIK_SSH_USER}@${MIKROTIK_HOST}:backup-${DATE}.rsc" "${DEST}/mikrotik-${DATE}.rsc" || true
 fi
 
-# 5. Seluruh Docker named volume (generic loop, aman untuk volume baru yang ditambah nanti)
+# 4. Seluruh Docker named volume (generic loop, aman untuk volume baru yang ditambah nanti)
 echo "-> Docker named volumes"
 for VOL in mongo-data redis-data mosquitto-data grafana-data prometheus-data loki-data; do
   docker run --rm -v "${VOL}:/data" -v "${DEST}:/backup" alpine \
     tar czf "/backup/volume-${VOL}-${DATE}.tar.gz" -C /data . || echo "warn: volume ${VOL} tidak ditemukan"
 done
 
-# 6. Upload offsite (opsional)
+# 5. Upload offsite (opsional)
 if [ -n "${S3_BUCKET}" ]; then
   echo "-> Upload ke S3: ${S3_BUCKET}"
   aws s3 cp "${DEST}" "s3://${S3_BUCKET}/akses-vps/${DATE}/" --recursive
 fi
 
-# 7. Retensi lokal
+# 6. Retensi lokal
 echo "-> Bersihkan backup lokal > ${RETENTION_DAYS} hari"
 find "${BACKUP_ROOT}" -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" -exec rm -rf {} \;
 
