@@ -48,20 +48,51 @@ Di sisi server, tiap peer tetap `AllowedIPs = 10.66.66.N/32` masing-masing
 mana, dan sekaligus jadi routing table server untuk tahu paket ke IP mana
 diteruskan ke peer mana).
 
-Sudah diverifikasi: handshake sukses, ping ke `10.66.66.1` (server) berhasil
-dari beberapa client sekaligus (lihat daftar peer live di bawah).
+> Catatan: kontrol hub-and-spoke ini saat ini hidup sepenuhnya di *routing
+> table masing-masing client* (`AllowedIPs` client cuma `10.66.66.1/32`).
+> Server sendiri (`iptables FORWARD -i wg0 -j ACCEPT` / `-o wg0 -j ACCEPT`
+> tanpa pembatasan pasangan interface) tidak menolak forwarding wg0↔wg0 —
+> jadi ini bukan proteksi kriptografis, tergantung client tidak menambah
+> route sendiri ke `10.66.66.0/24`. Belum ada exception peer-to-peer yang
+> terdaftar per tanggal dokumen ini.
 
-### Peer aktif (per 2026-07-08)
+### Peer aktif (per 2026-07-11)
 
 | Label | IP tunnel | Perangkat | Status |
 |---|---|---|---|
-| client1 | `10.66.66.2` | Google Cloud Shell (`agent.obc-crypto.com` lab) | terhubung |
-| client2 | `10.66.66.3` | Google Cloud Shell (akun test 2) | terhubung |
-| client3 | `10.66.66.4` | Google Cloud Shell (akun test 3) | terhubung |
-| pop1 | `10.66.66.10` | accel-ppp BNG PoP 1 (lihat `docs/13`) | belum terhubung, menunggu hardware PoP sungguhan |
+| ltap-mini | `10.66.66.5` | MikroTik RB912R-2nD (RouterOS 7.7) — **client LAN pribadi**, bukan subscriber-facing: `ether1` + switch tambahan ke laptop, IP camera, media streaming saja, `wlan2` tetap disabled. Lihat catatan RouterOS di bawah. | **terhubung** — handshake aktif, ping dua arah OK |
+| client20 | `10.66.66.21` | Google Cloud Shell (sesi aktif saat ini) | **terhubung** — handshake aktif |
+| client16 | `10.66.66.17` | belum terdokumentasi | terdaftar, idle — handshake terakhir ~6 jam lalu, tidak sedang aktif |
+| client1 | `10.66.66.2` | Google Cloud Shell (`agent.obc-crypto.com` lab) | terdaftar, tidak ada handshake tercatat (sesi Cloud Shell kemungkinan tidak sedang jalan — VM Cloud Shell reset ~20 menit setelah sesi berakhir) |
+| client2 | `10.66.66.3` | Google Cloud Shell (akun test 2) | terdaftar, tidak ada handshake tercatat (idem client1) |
+| client3 | `10.66.66.4` | Google Cloud Shell (akun test 3) | terdaftar, tidak ada handshake tercatat (idem client1) |
+| client7 | `10.66.66.8` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
+| client12 | `10.66.66.13` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
+| client13 | `10.66.66.14` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
 
-`client4`/`client5` (`10.66.66.5`/`.6`) dicadangkan untuk testing berikutnya,
-belum didaftarkan (belum ada public key nyata).
+**`pop1` (`10.66.66.10`) sengaja tidak terdaftar saat ini** — slot lama (didaftarkan
+2026-07-08) key-nya hilang saat manual-edit dan sudah di-deregister
+(2026-07-11, `deregister-client-peer.sh pop1`) karena tidak bisa dipulihkan dan
+tidak ada yang terhubung dengannya. Sempat dipertimbangkan memakai `ltap-mini`
+sebagai `pop1` (BNG PPPoE via fitur native RouterOS, pengganti `accel-ppp` yang
+memang tidak bisa jalan di RouterOS — lihat `docs/13`), tapi dibatalkan: jaringan
+di belakang `ltap-mini` terkonfirmasi cuma perangkat pribadi (laptop/kamera/
+streaming), bukan CPE pelanggan, jadi PPPoE-server tidak akan pernah dipakai.
+`pop1` didaftarkan ulang nanti (key baru, `register-client-peer.sh pop1
+<public-key> 10.66.66.10`) begitu ada hardware PoP sungguhan yang benar-benar
+menghadap subscriber — RADIUS client `pop1` di `freeradius/raddb/clients.conf`
+(IP `10.66.66.10`, secret) sudah siap dan tidak perlu diubah saat itu terjadi.
+
+**`client4` (`10.66.66.5`, didaftarkan 2026-07-09) hilang/mati** — public key-nya
+ke-blank saat proses manual-edit dan tidak ada backup `wg0.conf` yang menyimpan
+key aslinya, jadi tidak bisa dipulihkan. IP `10.66.66.5` yang tadinya dicadangkan
+untuknya sekarang dipakai ulang oleh `ltap-mini`. Kalau `client4` perlu diaktifkan
+lagi, daftarkan sebagai peer baru dengan key baru dan IP lain yang masih kosong.
+
+"Belum terdokumentasi" di atas berarti label ada di `wg0.conf` (via
+`register-client-peer.sh`) tapi tidak ada catatan perangkat/tujuannya di mana
+pun — untuk registrasi berikutnya, sertakan deskripsi perangkat di komentar
+`[Peer]` atau update tabel ini di saat yang sama, supaya tidak menumpuk lagi.
 
 ## Menambah client baru
 
@@ -103,10 +134,44 @@ wg genkey | tee clientN_private.key | wg pubkey > clientN_public.key
 sudo wg syncconf wg0 <(wg-quick strip wg0)   # reload tanpa downtime
 ```
 
+**Peringatan operasional:** beberapa peer di atas sempat rusak (key ke-blank,
+seluruh blok `[Peer]` terhapus, key satu peer ke-paste ke blok peer lain)
+akibat edit manual langsung ke `wg0.conf` di luar `register-client-peer.sh`/
+`deregister-client-peer.sh` (lihat komentar historis di file itu sendiri,
+tanggal 2026-07-09). **Selalu pakai kedua script ini**, jangan edit
+`wg0.conf` dengan tangan — script sudah menangani backup, validasi, dan
+reload atomik yang justru ada untuk mencegah insiden itu.
+
+### Catatan khusus: client RouterOS/MikroTik (mis. `ltap-mini`)
+
+Peer `ltap-mini` (MikroTik RB912R-2nD, RouterOS 7.7) sempat handshake sukses
+tapi ping ke `10.66.66.1` selalu timeout dari terminal RouterOS-nya (insiden
+2026-07-11). Root cause: **RouterOS tidak otomatis menambahkan route dari
+`allowed-address` di `/interface wireguard peers`**, berbeda dengan
+`wg-quick` di Linux yang otomatis `ip route add` untuk setiap `AllowedIPs`.
+Akibatnya handshake + `persistent-keepalive` tetap jalan normal (paket
+keepalive dibuat langsung oleh driver WireGuard, tidak lewat routing table),
+tapi trafik IP asli (ping, dst) tidak punya jalur keluar/masuk lewat
+interface tunnel sama sekali.
+
+Fix-nya, route harus ditambahkan manual di RouterOS:
+
+```
+/ip route add dst-address=10.66.66.1/32 gateway=wg-akses-vps comment="route ke AKSES-VPS hub via WireGuard"
+```
+
+(`/32` ke hub saja, bukan `10.66.66.0/24`, supaya tetap konsisten dengan
+desain hub-and-spoke di atas.) **Setiap client RouterOS/MikroTik baru
+(termasuk hardware PoP sungguhan nanti saat `pop1` didaftarkan ulang) perlu
+route manual ini** — checklist setup client MikroTik jadi: buat interface
+`wireguard`, tambah peer dengan `allowed-address=10.66.66.1/32`, **plus**
+`/ip route add` di atas, baru verifikasi dengan `/ping 10.66.66.1`.
+
 ## Keamanan
 
 - Private key server (`/etc/wireguard/server_private.key`) permission 600, root-only.
 - Private key client **tidak disimpan di server** setelah dibagikan ke pemilik device.
 - Port 51820/udp satu-satunya port VPN yang terbuka; tidak ada port WireGuard lain.
 - **Hub-and-spoke, bukan mesh** (lihat bagian di atas) - blast radius satu client
-  yang kompromis dibatasi ke hub saja, tidak menyebar ke client/PoP lain.
+  yang kompromis dibatasi ke hub saja, tidak menyebar ke client/PoP lain — catatan:
+  saat ini ini kontrol client-side saja, lihat catatan di bagian topologi di atas.
