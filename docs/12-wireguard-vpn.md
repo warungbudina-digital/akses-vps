@@ -167,6 +167,61 @@ route manual ini** — checklist setup client MikroTik jadi: buat interface
 `wireguard`, tambah peer dengan `allowed-address=10.66.66.1/32`, **plus**
 `/ip route add` di atas, baru verifikasi dengan `/ping 10.66.66.1`.
 
+### Audit keamanan & hardening `ltap-mini` (2026-07-11)
+
+Setelah tunnel-nya jalan, dilakukan audit live via SSH langsung ke device
+(`10.66.66.5:2222`, lewat tunnel dari akses-vps — WAN `wlan1` sengaja tidak
+membuka SSH/Winbox dari internet sama sekali, jadi ini satu-satunya jalur
+remote ke device ini). Board terkonfirmasi `LtAP mini` asli (MIPS 24Kc,
+64MB RAM, 16MB storage — sangat terbatas, perhatikan kalau mau nambah
+konfigurasi/logging di device ini).
+
+**Sudah baik dari awal (dikonfirmasi live, sempat dikira belum di-hardening
+dari baca `.rsc` statis saja):**
+- `telnet`/`ftp`/`www`/`api`/`api-ssl` semua sudah `disabled` di `/ip service`
+  — cuma `ssh` (dipindah ke port `2222`, bukan default `22`) dan `winbox`
+  (`8291`) yang aktif.
+- `wlan2` terkonfirmasi `disabled` di level interface (bukan cuma ganti SSID).
+- Hanya satu user (`full` privilege) — wajar untuk single-operator device,
+  tidak perlu dipecah kecuali ada operator lain nanti.
+
+**Diterapkan saat audit (live, terverifikasi tidak memutus akses):**
+```
+/ip firewall filter set [find comment="allow dari tunnel AKSES-VPS" and chain=input] src-address=10.66.66.1
+/ip firewall filter set [find comment="dari tunnel AKSES-VPS" and chain=forward] src-address=10.66.66.1
+/ip firewall filter set [find comment="drop invalid" and chain=forward] disabled=no
+```
+Sebelumnya rule input/forward untuk `in-interface=wg-akses-vps` menerima dari
+siapa pun yang bisa reach lewat tunnel, bukan cuma hub — sekarang dibatasi
+`src-address=10.66.66.1` (defense-in-depth terhadap gap iptables FORWARD
+`wg0`↔`wg0` di server yang belum diperbaiki, lihat catatan di bagian topologi
+hub-and-spoke di atas). Rule `drop invalid` di `chain=forward` yang tadinya
+`disabled=yes` juga diaktifkan, konsisten dengan `chain=input`.
+
+**Diketahui, sengaja TIDAK diubah (keputusan operator, bukan terlewat):**
+- Profil WiFi `wifi-kantor` (dipakai `wlan1` sebagai WAN) masih mengizinkan
+  WPA1 (`wpa-psk`) + cipher TKIP yang deprecated, bukan WPA2/AES-only —
+  berisiko downgrade attack dari rogue/evil-twin AP. PSK-nya sendiri juga
+  lemah (pola kata umum + angka pendek). Tidak diubah karena AP "Kantor"
+  di luar kendali langsung, dan device ini cuma bisa diakses remote lewat
+  jalur yang bergantung pada `wlan1` — kalau AP asli ternyata butuh WPA1/TKIP,
+  memperketat ke WPA2-only bisa memutus WAN dan menghilangkan satu-satunya
+  jalur remote ke device ini sampai ada yang datang fisik ke lokasi.
+- Firewall `chain=input`/`forward` untuk `in-interface=ether1` (LAN) masih
+  accept-all, belum dibatasi ke address-list admin — risiko relatif kecil
+  karena cuma `ssh`/`winbox` yang listening sama sekali di seluruh sistem
+  (lihat poin "sudah baik" di atas), tapi kalau nanti ada operator lain atau
+  device tambahan di LAN yang tidak sepenuhnya dipercaya, ini kandidat
+  hardening berikutnya.
+
+**Persistensi:** config RouterOS (termasuk keypair WireGuard di
+`wg-akses-vps`) tersimpan permanen di flash device, bukan di RAM — beda
+dengan client Google Cloud Shell yang harus di-`.customize_environment`-kan
+supaya persistent. Restart/mati listrik **tidak** menghapus config; tunnel
+akan reconnect sendiri (`persistent-keepalive`) begitu `wlan1` dapat WAN lagi.
+Yang menghapus config: factory reset atau ganti unit hardware (key terikat
+ke instance interface, bukan ke device secara umum).
+
 ## Keamanan
 
 - Private key server (`/etc/wireguard/server_private.key`) permission 600, root-only.
