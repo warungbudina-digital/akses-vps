@@ -435,3 +435,32 @@ bukti historis port eksternal pernah jalan — tapi status HDMI secara
 spesifik (vs VGA) dan apakah masih berfungsi HARI INI **belum bisa
 dipastikan tanpa tes fisik** (colok display asli ke port HDMI-nya
 langsung). Perlu verifikasi manual di lokasi kalau mau kepastian penuh.
+
+### Tes HDMI langsung: laptop `SuaraHati` -> TBS 2603SE (2026-07-13)
+HDMI laptop `SuaraHati` disambungkan langsung ke input HDMI TBS 2603SE
+untuk tes nyata (menyusul catatan "perlu verifikasi manual" di atas).
+Dicek dari kedua sisi secara bersamaan:
+
+- **Sisi TBS:** `enc.getInputState` via RPC tetap menunjukkan
+  `"avalible": false` untuk channel HDMI — tidak ada sinyal terdeteksi.
+- **Sisi laptop:** Windows tetap cuma mendeteksi satu display (layar
+  built-in, 1366x768) — tidak ada display kedua yang muncul.
+- Dipaksa lewat `DisplaySwitch.exe /extend` supaya Windows coba aktifkan
+  output kedua secara paksa — **tidak ada perubahan**, tetap cuma satu
+  display terdeteksi.
+- Windows Event Log (`System`) dicek untuk event hotplug/PnP di sekitar
+  waktu pengetesan — tidak ada event terkait HDMI/display sama sekali,
+  cuma driver audio/kernel filter generik dari boot sebelumnya.
+
+**Kesimpulan:** sudah ruled out kemungkinan software/driver di sisi laptop
+(driver GPU sehat, forced-extend tidak membantu, tidak ada hotplug event
+sama sekali baik dari OS maupun dari status TBS) — mengarah ke **masalah
+hardware/kabel**, bukan konfigurasi. Kandidat: kabel tidak terpasang
+sempurna/kabel rusak, port HDMI laptop yang fisiknya bermasalah (sejalan
+dengan catatan audit sebelumnya — cuma ada bukti HISTORIS port eksternal
+pernah jalan, tidak ada bukti aktif saat ini), atau port input HDMI TBS
+yang bermasalah.
+
+**Langkah lanjut yang disarankan:** tes port HDMI laptop langsung ke
+monitor/TV yang diketahui berfungsi (tanpa lewat TBS) untuk isolasi apakah
+masalahnya di laptop atau di TBS — belum dilakukan, perlu di lokasi.
