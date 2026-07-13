@@ -351,3 +351,56 @@ Catatan tambahan: ada satu device lain di lease yang sama
 terdeteksi juga lewat LLDP dengan system-caps repeater/wlan-ap/router) —
 kemungkinan AP/router pribadi, bukan bagian dari topologi kamera, belum
 diselidiki lebih lanjut.
+
+### Audit laptop `SuaraHati` di LAN `ltap-mini` (2026-07-13)
+Device kedua yang terdeteksi di lease `ltap-mini` (`192.168.70.254`,
+lihat catatan switch Ruijie di atas) diaudit langsung lewat SSH
+(`warungbudina@192.168.70.254`, Win32-OpenSSH — shell default `cmd.exe`,
+dipakai `powershell`/`wmic` untuk detail). Akses dari luar LAN-nya lewat
+SOCKS4 sementara di `ltap-mini` (`/ip socks`, sama seperti diagnostik RTSP
+sebelumnya — dimatikan lagi setelah selesai).
+
+**Hardware:** ASUS X450EA (laptop budget ~2014), AMD E1-2500 APU 2-core/
+2-thread @1.4GHz, RAM ~9.4GB (kemungkinan upgrade dari stok, kapasitas
+ganjil menandakan kombinasi keping tidak seragam), storage SSD 240GB
+(BULLDOZER-240GB, merek generik/OEM) dengan ±153GB free dari 223GB
+usable, BIOS AMI `X450EA.303` (2014-02-28).
+
+**OS & software:** Windows 8.1 Pro 64-bit (build 9600, tanggal install
+tercatat 2023-12-10 — kemungkinan besar reimage, bukan install asli).
+User lokal: `Administrator`, `Guest`, `warungbudina`. Windows Defender
+aktif, Windows Firewall ON di ketiga profile (Domain/Private/Public).
+Software terpasang yang relevan: Chrome, Edge, VS Code, Google Cloud SDK,
+VLC, WinRAR, **RealVNC Viewer**, **Advanced IP Scanner 2.5.1** (network
+scanner), AMD Catalyst Control Center, driver Realtek Ethernet +
+Qualcomm/Intel Android USB (kemungkinan buat tethering/dev HP). Ada satu
+entry tidak jelas: **web control version 3.0.7.7** — nama generik,
+fungsinya belum diketahui, perlu ditelusuri kalau sempat.
+
+**Network:** device ini **dual-homed** — WiFi `Wi-Fi-Utama` ke
+`192.168.1.30` (jaringan kantor yang sama dipakai WAN `ltap-mini`) **dan**
+Ethernet ke `192.168.70.254` (LAN kamera/encoder ini) sekaligus.
+`IP Routing Enabled: No` di Windows-nya, jadi tidak aktif nge-bridge dua
+jaringan itu, tapi tetap punya presence langsung di keduanya. Port yang
+listening: `22` (sshd, jalur akses audit ini), `135/445/139` (RPC/SMB/
+NetBIOS standar Windows), `554` (RTSP — dicek ternyata `wmpnetwk.exe`,
+built-in Windows Media Player Network Sharing, bukan terkait kamera),
+`1025-1030`/`2869`/`5357`/`10243` (RPC dinamis & SSDP/device discovery
+standar).
+
+**Temuan yang perlu perhatian:**
+1. Windows 8.1 sudah **end-of-life** (extended support berakhir Januari
+   2023) — tidak lagi dapat security patch dari Microsoft, terlepas dari
+   panjangnya daftar update yang sudah terpasang.
+2. Password SSH yang dipakai untuk audit ini (`123`) **sangat lemah** —
+   gampang di-brute-force, dan sshd-nya reachable dari seluruh LAN ini.
+3. Karena dual-homed, kalau device ini kompromis, dampaknya bisa nyebar
+   ke jaringan kantor (`192.168.1.0/24`) sekaligus LAN kamera/encoder ini.
+4. Kombinasi RealVNC Viewer + network scanner mengindikasikan device ini
+   mungkin dipakai juga sebagai alat admin/akses jaringan — perlu
+   dikonfirmasi itu memang disengaja, bukan sisa instalasi lama yang
+   terlupakan.
+
+Belum ada tindakan perbaikan yang diterapkan pada audit ini (murni
+observasi) — password SSH dan status EOL OS jadi kandidat utama kalau mau
+di-follow-up.
