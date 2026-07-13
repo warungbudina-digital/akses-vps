@@ -330,3 +330,24 @@ upload (coba ambil isi file balik lewat HTTP) juga gagal — RouterOS 7.7
 selalu mengirim `Content-Length: 0` untuk mode ini, jadi body tidak
 pernah benar-benar terkirim (kemungkinan bug/keterbatasan firmware, bukan
 masalah di sisi penerima).
+
+### Switch Ruijie terdeteksi di LAN `ltap-mini` (2026-07-13)
+Terkait rencana pasang kamera IP langsung (lihat bagian di atas), switch
+Ruijie yang akan jadi tempat colok kamera sudah terdeteksi di LAN
+`ltap-mini` (`192.168.70.0/24`, interface `ether1` — LAN yang sama dengan
+TBS 2603SE) lewat DHCP lease:
+- IP: `192.168.70.253`
+- Hostname: `RG-ES205GC-C79F47` (seri Ruijie RG-ES205GC)
+- MAC: `EC:B9:70:C7:9F:47`
+
+Dicek lewat `/ip dhcp-server lease print detail` di `ltap-mini`, status
+`bound`, aktif. Belum ada kamera yang tersambung ke switch ini per catatan
+tanggal di atas — begitu kamera terpasang dan dapat IP, channel Net1/Net2
+TBS bisa dikonfigurasi mengarah ke situ (ganti pendekatan DVR yang sudah
+di-revert).
+
+Catatan tambahan: ada satu device lain di lease yang sama
+(`192.168.70.254`, hostname `SuaraHati`, MAC `10:C3:7B:B5:ED:72`,
+terdeteksi juga lewat LLDP dengan system-caps repeater/wlan-ap/router) —
+kemungkinan AP/router pribadi, bukan bagian dari topologi kamera, belum
+diselidiki lebih lanjut.
