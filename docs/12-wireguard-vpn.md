@@ -230,3 +230,57 @@ ke instance interface, bukan ke device secara umum).
 - **Hub-and-spoke, bukan mesh** (lihat bagian di atas) - blast radius satu client
   yang kompromis dibatasi ke hub saja, tidak menyebar ke client/PoP lain — catatan:
   saat ini ini kontrol client-side saja, lihat catatan di bagian topologi di atas.
+
+### Routing ke jaringan DVR eksternal untuk kamera Net1 TBS 2603SE (2026-07-13)
+Encoder TBS 2603SE (`192.168.70.217`, LAN `ltap-mini`) perlu diarahkan ke
+sebuah DVR/NVR bergaya Hikvision di jaringan kantor lain yang **tidak**
+langsung terhubung ke `ltap-mini`. Topologi yang ditemukan saat audit:
+
+```
+akses-vps (VPS) --WireGuard--> ltap-mini (10.66.66.5, LAN 192.168.70.0/24)
+                                   |
+                                   +--wlan1 (WiFi client, wifi-kantor)--> 192.168.1.0/24
+                                                                              |
+                                                                              +-- 192.168.1.1 (gateway internet kantor, TIDAK
+                                                                              |    punya rute balik ke 192.168.60.0/24)
+                                                                              +-- 192.168.1.20 (router lokal terpisah, WAN di
+                                                                                   192.168.1.0/24, LAN bridge-all di
+                                                                                   192.168.60.0/24 - DVR ada di sini)
+```
+
+`192.168.1.1` (gateway kantor) tidak tahu cara route ke `192.168.60.0/24`
+milik router lokal `192.168.1.20` — dua jaringan itu tidak saling
+terhubung di level routing meskipun satu fisik lokasi. Karena `192.168.1.1`
+di luar kendali (bukan device kita), fix-nya dilakukan sepenuhnya di
+`ltap-mini` pakai static route + NAT (bukan minta perubahan di router
+kantor):
+```
+/ip route add dst-address=192.168.60.0/24 gateway=192.168.1.20 comment=to-DVR-net
+/ip firewall nat add chain=srcnat dst-address=192.168.60.0/24 out-interface=wlan1 action=masquerade comment=nat-to-DVR-net
+```
+Dengan masquerade, trafik ke `192.168.60.0/24` terlihat oleh
+`192.168.1.20` datang dari `192.168.1.40` (IP `wlan1` milik
+`ltap-mini` sendiri di jaringan kantor) — `192.168.1.20` tidak perlu rute
+balik khusus karena itu memang alamat yang langsung terhubung di
+`ether1`-nya, dan dia sudah otomatis tahu cara ke `192.168.60.0/24`
+(LAN-nya sendiri di `bridge-all`). Setelah rule ini, `ping` dari
+`ltap-mini` ke DVR (`192.168.60.240`) berhasil (sebelumnya 100% loss).
+
+**Channel Net1 di TBS diupdate** (via `POST /RPC` JSON-RPC 2.0 milik encoder,
+method `enc.update`, bukan lewat RouterOS) — `enable=true`,
+`net.decodeV=true`, `net.decodeA=true`, dan `net.path` diarahkan ke
+stream channel 1 DVR (URL RTSP lengkap dengan kredensial ada di
+`docs/.local-credentials/net1-dvr-camera.env`, **tidak** di-commit —
+lihat entri baru di `.gitignore`).
+
+**Belum selesai / known issue:** setelah routing jalan dan channel
+diaktifkan, encoder aktif mencoba connect ke DVR (terkonfirmasi lewat
+`/ip firewall connection print` di `ltap-mini` — ada exchange TCP
+~250-300 byte tiap beberapa detik) tapi belum menghasilkan gambar. Pola yang
+diamati (percobaan koneksi manual dari luar makin cepat ditolak DVR seiring
+banyaknya percobaan berturut-turut) mengarah ke proteksi
+rate-limit/lockout koneksi di sisi DVR, kemungkinan dipicu kombinasi retry
+otomatis encoder + percobaan manual saat troubleshooting — bukan masalah
+kredensial RTSP yang pasti salah. Sedang menunggu cooldown lalu cek ulang;
+kalau masih gagal setelah itu, langkah berikutnya adalah cek pengaturan
+lockout IP dan kredensial RTSP terpisah (kalau ada) langsung di web UI DVR.
