@@ -404,3 +404,34 @@ standar).
 Belum ada tindakan perbaikan yang diterapkan pada audit ini (murni
 observasi) — password SSH dan status EOL OS jadi kandidat utama kalau mau
 di-follow-up.
+
+### Update audit `SuaraHati`: password SSH diganti, cek port HDMI (2026-07-13)
+Follow-up dari audit di atas:
+
+**Password SSH diganti.** Password lama (`123`) diganti dengan password
+random kuat (20 karakter, campuran huruf besar/kecil/angka/simbol) lewat
+`net user warungbudina` (akun `warungbudina` di laptop ini member grup
+Administrators lokal, jadi bisa langsung set tanpa perlu password lama).
+Terverifikasi: login dengan password baru berhasil, password lama sudah
+ditolak. Password baru disimpan di luar git (lihat `.gitignore`), tidak
+dicatat di sini.
+
+**Cek hardware port HDMI.** Diminta audit apakah port HDMI di laptop ini
+berfungsi. **Tidak bisa dites fisik dari remote** (butuh display benar-benar
+tercolok saat ini) — hasil yang bisa dikumpulkan lewat WMI/registry:
+- Driver GPU (AMD Radeon HD 8240): status `OK`, tidak ada error.
+- Display yang aktif SEKARANG cuma layar built-in laptop (1366x768,
+  EDID `CMN1491`) — dikonfirmasi `VideoOutputTechnology` = internal, bukan
+  eksternal.
+- Device Manager: tidak ada error terkait GPU/display sama sekali (cuma
+  satu error tidak terkait, sisa driver PS/2 mouse yang stale).
+- **Riwayat EDID di registry menunjukkan DUA monitor eksternal berbeda**
+  (`GSM5B01`, `LKP2C02` — ID panel beda dari layar built-in) pernah
+  terdeteksi di masa lalu — bukti kuat salah satu port video eksternal
+  laptop ini (HDMI dan/atau VGA, X450EA punya keduanya) **pernah berfungsi**.
+
+**Kesimpulan:** tidak ada indikasi masalah di level driver/OS, dan ada
+bukti historis port eksternal pernah jalan — tapi status HDMI secara
+spesifik (vs VGA) dan apakah masih berfungsi HARI INI **belum bisa
+dipastikan tanpa tes fisik** (colok display asli ke port HDMI-nya
+langsung). Perlu verifikasi manual di lokasi kalau mau kepastian penuh.
