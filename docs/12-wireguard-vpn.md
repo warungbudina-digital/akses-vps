@@ -284,3 +284,49 @@ otomatis encoder + percobaan manual saat troubleshooting — bukan masalah
 kredensial RTSP yang pasti salah. Sedang menunggu cooldown lalu cek ulang;
 kalau masih gagal setelah itu, langkah berikutnya adalah cek pengaturan
 lockout IP dan kredensial RTSP terpisah (kalau ada) langsung di web UI DVR.
+
+### Update: pendekatan DVR dibatalkan, konfigurasi di-revert (2026-07-13)
+Setelah routing ke DVR berhasil (lihat bagian di atas) tapi gambar Net1
+tetap tidak muncul — encoder terus mencoba connect (~250-300 byte exchange
+tiap beberapa detik, terkonfirmasi lewat `/ip firewall connection print`)
+namun tidak pernah berhasil establish stream, bahkan setelah cooldown 10
+menit dengan pola byte exchange yang identik persis (jadi bukan soal
+rate-limit sementara, kemungkinan besar kredensial RTSP terpisah dari
+kredensial web login, atau path RTSP tidak sesuai standar Hikvision asli
+di firmware OEM/clone ini) — diputuskan untuk **tidak jadi memakai DVR
+Hikvision ini sebagai sumber Net1/Net2**. Kamera IP akan dipasang langsung
+nanti, terhubung ke switch Ruijie, alih-alih lewat DVR di jaringan kantor
+lain yang terpisah.
+
+**Semua perubahan terkait di-revert ke kondisi semula:**
+- Channel Net1 di TBS: `enable=false`, `net.path` kembali ke placeholder
+  pabrik (`rtsp://admin:admin@192.168.1.23/cam/realmonitor?channel=1&subtype=0`,
+  sama seperti Net2 yang memang tidak pernah dipakai), `decodeV`/`decodeA`
+  kembali `false`.
+- Static route (`dst-address=192.168.60.0/24 gateway=192.168.1.20`) dan NAT
+  masquerade (`nat-to-DVR-net`) di `ltap-mini` dihapus — tidak ada lagi
+  rute ke jaringan DVR dari `ltap-mini`.
+- `/ip socks` di `ltap-mini` (sempat diaktifkan sementara untuk diagnostik
+  RTSP langsung) dikembalikan ke `disabled`.
+- File kredensial `docs/.local-credentials/net1-dvr-camera.env` dihapus,
+  sudah tidak relevan.
+
+**Catatan teknis penting untuk kerja berikutnya lewat jalur yang sama:**
+saat verifikasi, ditemukan bahwa `/tool fetch ... output=user` RouterOS
+kadang **merender ulang string panjang tanpa spasi (URL) dengan menyisipkan
+spasi di titik word-wrap** — tidak konsisten/tidak selalu terjadi, dan
+tidak terkait lebar terminal (sudah dicoba PTY 30000 kolom, tetap muncul).
+Ini murni bug tampilan konsol, bukan korupsi data asli di device — tapi
+kalau hasil `output=user` dipakai lagi untuk membangun payload
+`enc.update` berikutnya tanpa validasi, field seperti `net.path` bisa
+ke-submit dengan korupsi tanpa sadar. Sempat kejadian sekali pada field
+`Net2.net.path` (untung tidak dipakai/tidak signifikan) sebelum ketahuan
+dan diperbaiki. **Wajib validasi ulang tiap field URL/path (grep untuk
+spasi mencurigakan) sebelum submit `enc.update`** kalau proses
+serupa diulang nanti. `/tool fetch ... dst-path=` (simpan ke file lokal)
+sendiri terbukti reliable/byte-exact; masalah cuma muncul saat memakai
+`output=user` untuk preview di konsol. Upaya pakai `src-path=` untuk POST
+upload (coba ambil isi file balik lewat HTTP) juga gagal — RouterOS 7.7
+selalu mengirim `Content-Length: 0` untuk mode ini, jadi body tidak
+pernah benar-benar terkirim (kemungkinan bug/keterbatasan firmware, bukan
+masalah di sisi penerima).
