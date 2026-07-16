@@ -25,6 +25,7 @@ import (
 
 	"github.com/warungbudina/akses-vps/grpc-server/internal/auth"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/config"
+	"github.com/warungbudina/akses-vps/grpc-server/internal/genieacs"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/middleware"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/server"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/store"
@@ -53,6 +54,7 @@ func main() {
 	log := logger.New(cfg.LogLevel, cfg.LogFormat)
 
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret, cfg.JWTIssuer, 24*time.Hour)
+	genieACSClient := genieacs.NewClient(cfg.GenieACSNBIURL)
 
 	// ctx is created here (rather than right before the serve loop, as
 	// before) so the mongo background-retry goroutine below can share it
@@ -110,7 +112,7 @@ func main() {
 		log.Info("grpc TLS disabled (expecting TLS termination upstream, e.g. nginx)")
 	}
 
-	grpcServer, health, deviceSvc := server.NewGRPCServer(mongoStore, unaryInterceptors, serverOpts...)
+	grpcServer, health, deviceSvc := server.NewGRPCServer(mongoStore, genieACSClient, unaryInterceptors, serverOpts...)
 
 	if mongoStore == nil && cfg.MongoURI != "" {
 		go retryMongoConnect(ctx, cfg.MongoURI, &mongoStoreRef, deviceSvc, log)

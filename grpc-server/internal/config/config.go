@@ -25,6 +25,8 @@ type Config struct {
 
 	MongoURI string
 
+	GenieACSNBIURL string
+
 	MQTTBrokerURL string
 	MQTTUsername  string
 	MQTTPassword  string
@@ -54,6 +56,11 @@ func Load() *Config {
 		RedisDB:       envInt("REDIS_DB", 0),
 
 		MongoURI: envStr("MONGO_URI", ""),
+
+		// genieacs-nbi tidak dipublish keluar docker network (lihat
+		// docker-compose.reference.yml) dan tidak butuh auth - default
+		// mengasumsikan grpc-server jalan di network docker yang sama.
+		GenieACSNBIURL: envStr("GENIEACS_NBI_URL", "http://genieacs-nbi:7557"),
 
 		MQTTBrokerURL: envStr("MQTT_BROKER_URL", "tcp://mosquitto:1883"),
 		MQTTUsername:  envStr("MQTT_USERNAME", "grpc-service"),

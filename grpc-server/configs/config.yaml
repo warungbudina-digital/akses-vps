@@ -19,6 +19,9 @@ redis:
   password: ""
   db: 0
 
+genieacs:
+  nbi_url: "http://genieacs-nbi:7557"
+
 mongo:
   uri: "mongodb://grpc_readonly:CHANGE_ME@mongodb:27017/genieacs?authSource=genieacs"
 

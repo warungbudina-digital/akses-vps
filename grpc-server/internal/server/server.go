@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,6 +15,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 
+	"github.com/warungbudina/akses-vps/grpc-server/internal/genieacs"
 	"github.com/warungbudina/akses-vps/grpc-server/internal/store"
 	devicev1 "github.com/warungbudina/akses-vps/grpc-server/proto/gen"
 )
@@ -35,6 +39,21 @@ type DeviceService interface {
 	StoreSetter
 }
 
+// defaultListPageSize/maxListPageSize bound ListDevices' page_size: unset
+// falls back to default, oversized requests are clamped rather than
+// rejected outright since a caller asking for too much is a much more
+// common mistake than one being malicious about it.
+const (
+	defaultListPageSize = 50
+	maxListPageSize     = 500
+)
+
+// deviceOnlineThreshold: a CPE that's informed within this window of "now"
+// is considered online. TR-069 periodic inform defaults to 300-600s across
+// the vendors provisioned here (see genieacs/examples/preset-default-config.json);
+// this leaves a couple of missed cycles of slack before flipping to offline.
+const deviceOnlineThreshold = 15 * time.Minute
+
 // deviceServiceServer implementasi RPC yang didefinisikan di proto/device.proto.
 // Detail integrasi ke GenieACS NBI / MQTT publisher disuntik lewat field,
 // bukan hard-coded, supaya gampang di-mock saat unit test.
@@ -45,11 +64,18 @@ type deviceServiceServer struct {
 	// goroutines) and SetStore (written from the mongo retry goroutine)
 	// can race safely without a mutex.
 	store atomic.Pointer[store.MongoStore]
-	// genieACSClient, mqttPublisher, dst. — disuntik dari main.go
+
+	// genieACSClient talks to genieacs-nbi over plain HTTP within the
+	// docker network — no auth, since NBI isn't published outside it (see
+	// docker-compose.reference.yml). Never nil in practice (main.go always
+	// constructs one), but ListDevices/GetDevice check anyway so a future
+	// caller that skips the constructor fails loudly instead of panicking.
+	genieACSClient *genieacs.Client
+	// mqttPublisher — disuntik dari main.go (belum diimplementasikan, lihat PublishCommand)
 }
 
-func NewDeviceServiceServer(mongoStore *store.MongoStore) *deviceServiceServer {
-	d := &deviceServiceServer{}
+func NewDeviceServiceServer(mongoStore *store.MongoStore, genieACSClient *genieacs.Client) *deviceServiceServer {
+	d := &deviceServiceServer{genieACSClient: genieACSClient}
 	if mongoStore != nil {
 		d.store.Store(mongoStore)
 	}
@@ -61,16 +87,81 @@ func (s *deviceServiceServer) SetStore(mongoStore *store.MongoStore) {
 }
 
 func (s *deviceServiceServer) ListDevices(ctx context.Context, req *devicev1.ListDevicesRequest) (*devicev1.ListDevicesResponse, error) {
-	// TODO: query genieacs-nbi (GET /devices) lalu mapping ke Device{}
-	return &devicev1.ListDevicesResponse{}, nil
+	if s.genieACSClient == nil {
+		return nil, status.Error(codes.Unavailable, "genieacs client not configured")
+	}
+
+	pageSize := int(req.GetPageSize())
+	switch {
+	case pageSize <= 0:
+		pageSize = defaultListPageSize
+	case pageSize > maxListPageSize:
+		pageSize = maxListPageSize
+	}
+
+	skip := 0
+	if tok := req.GetPageToken(); tok != "" {
+		parsed, err := strconv.Atoi(tok)
+		if err != nil || parsed < 0 {
+			return nil, status.Error(codes.InvalidArgument, "invalid page_token")
+		}
+		skip = parsed
+	}
+
+	devices, total, err := s.genieACSClient.ListDevices(ctx, pageSize, skip)
+	if err != nil {
+		slog.Error("list_devices_failed", "error", err)
+		return nil, status.Error(codes.Internal, "failed to query genieacs")
+	}
+
+	resp := &devicev1.ListDevicesResponse{
+		Devices: make([]*devicev1.Device, len(devices)),
+	}
+	for i, d := range devices {
+		resp.Devices[i] = toProtoDevice(d)
+	}
+	if next := skip + len(devices); next < total {
+		resp.NextPageToken = strconv.Itoa(next)
+	}
+	return resp, nil
 }
 
 func (s *deviceServiceServer) GetDevice(ctx context.Context, req *devicev1.GetDeviceRequest) (*devicev1.Device, error) {
 	if req.GetDeviceId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "device_id is required")
 	}
-	// TODO: query genieacs-nbi (GET /devices/{id})
-	return nil, status.Error(codes.NotFound, "device not found")
+	if s.genieACSClient == nil {
+		return nil, status.Error(codes.Unavailable, "genieacs client not configured")
+	}
+
+	device, err := s.genieACSClient.GetDevice(ctx, req.GetDeviceId())
+	if errors.Is(err, genieacs.ErrNotFound) {
+		return nil, status.Error(codes.NotFound, "device not found")
+	}
+	if err != nil {
+		slog.Error("get_device_failed", "device_id", req.GetDeviceId(), "error", err)
+		return nil, status.Error(codes.Internal, "failed to query genieacs")
+	}
+	return toProtoDevice(*device), nil
+}
+
+func toProtoDevice(d genieacs.Device) *devicev1.Device {
+	deviceStatus := "offline"
+	var lastInformUnix int64
+	if !d.LastInform.IsZero() {
+		lastInformUnix = d.LastInform.Unix()
+		if time.Since(d.LastInform) < deviceOnlineThreshold {
+			deviceStatus = "online"
+		}
+	}
+	return &devicev1.Device{
+		DeviceId:       d.ID,
+		SerialNumber:   d.SerialNumber,
+		Manufacturer:   d.Manufacturer,
+		ProductClass:   d.ProductClass,
+		LastInformUnix: lastInformUnix,
+		Status:         deviceStatus,
+	}
 }
 
 func (s *deviceServiceServer) PublishCommand(ctx context.Context, req *devicev1.PublishCommandRequest) (*devicev1.PublishCommandResponse, error) {
@@ -138,13 +229,13 @@ func (s *deviceServiceServer) LinkSubscriberSession(ctx context.Context, req *de
 // metrics, auth), health service, dan reflection (untuk debugging via
 // grpcurl — sebaiknya dimatikan di production murni lewat env flag).
 // extraOpts dipakai untuk menyuntik grpc.Creds(...) (TLS) bila diaktifkan.
-func NewGRPCServer(mongoStore *store.MongoStore, unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer, DeviceService) {
+func NewGRPCServer(mongoStore *store.MongoStore, genieACSClient *genieacs.Client, unaryInterceptors []grpc.UnaryServerInterceptor, extraOpts ...grpc.ServerOption) (*grpc.Server, *HealthServer, DeviceService) {
 	opts := append([]grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 	}, extraOpts...)
 	s := grpc.NewServer(opts...)
 
-	deviceSvc := NewDeviceServiceServer(mongoStore)
+	deviceSvc := NewDeviceServiceServer(mongoStore, genieACSClient)
 	devicev1.RegisterDeviceServiceServer(s, deviceSvc)
 
 	health := NewHealthServer()
