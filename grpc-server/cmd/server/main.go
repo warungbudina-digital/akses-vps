@@ -1,8 +1,11 @@
 // Command server adalah entrypoint grpc-server: gRPC di :50051 (h2, TLS
 // opsional — biasanya TLS di-terminate di nginx dan link internal plain h2c),
-// HTTP di :8443 untuk /healthz, /metrics (Prometheus), dan
+// HTTP di :8443 untuk /healthz, /metrics (Prometheus),
 // /v1/radius/accounting (webhook FreeRADIUS rlm_rest, lihat
-// internal/server/http_radius_accounting.go).
+// internal/server/http_radius_accounting.go), dan /v1/devices,
+// /v1/devices/{id} (REST fallback untuk ListDevices/GetDevice bagi klien
+// publik yang gRPC-nya gak reliable lewat Cloudflare Tunnel Free plan,
+// lihat internal/server/http_devices.go).
 package main
 
 import (
@@ -124,7 +127,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ---- HTTP server: healthz + metrics + radius accounting webhook ----
+	// ---- HTTP server: healthz + metrics + radius accounting webhook + device REST fallback ----
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -132,6 +135,7 @@ func main() {
 	})
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.Handle("/v1/radius/accounting", server.RadiusAccountingHandler(deviceSvc, cfg.InternalAPIKey))
+	server.RegisterDeviceRESTHandlers(mux, deviceSvc, jwtManager)
 	httpServer := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.HTTPPort),
 		Handler:           mux,
