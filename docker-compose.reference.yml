@@ -50,6 +50,8 @@ services:
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.3
     networks: [edge-net, app-net]
     ports:
       # 80/443 sengaja TIDAK di-publish lagi ke host - satu-satunya jalur
@@ -89,6 +91,8 @@ services:
     # bukan file ini - token-nya saja yang di-mount lewat env.
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.2
     networks: [edge-net, app-net]
     command: ["tunnel", "--no-autoupdate", "run"]
     environment:
@@ -103,6 +107,8 @@ services:
   grpc-server:
     build: ./grpc-server
     restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.3
     networks: [app-net, data-net, obs-net]
     read_only: true
     security_opt: ["no-new-privileges:true"]
@@ -126,6 +132,8 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
+    mem_limit: 48m
+    cpus: 0.2
     networks: [app-net, obs-net]
     volumes:
       - ./mosquitto/config:/mosquitto/config:ro
@@ -137,6 +145,8 @@ services:
     build: ./genieacs
     command: ["genieacs-cwmp"]
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.8
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
@@ -148,6 +158,8 @@ services:
     build: ./genieacs
     command: ["genieacs-nbi"]
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.3
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
@@ -159,6 +171,8 @@ services:
     build: ./genieacs
     command: ["genieacs-fs"]
     restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.2
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
@@ -170,6 +184,8 @@ services:
     build: ./genieacs
     command: ["genieacs-ui"]
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.2
     networks: [app-net, data-net, obs-net]
     env_file: [genieacs/genieacs.env]
     read_only: true
@@ -181,6 +197,8 @@ services:
   mongodb:
     image: mongo:7
     restart: unless-stopped
+    mem_limit: 320m
+    cpus: 0.8
     networks: [data-net, obs-net]
     command: ["--config", "/etc/mongod.conf"]
     volumes:
@@ -199,8 +217,13 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.2
     networks: [data-net, obs-net]
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    # maxmemory diset di bawah mem_limit container (96m) supaya Redis evict
+    # graceful (allkeys-lru) sebelum kena hard OOM-kill oleh cgroup - sudah
+    # direkomendasikan di docs/11 tapi belum pernah benar-benar di-wire ke sini.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes", "--maxmemory", "80mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis-data:/data
     security_opt: ["no-new-privileges:true"]
@@ -209,6 +232,8 @@ services:
   radius-db:
     image: postgres:16-alpine
     restart: unless-stopped
+    mem_limit: 160m
+    cpus: 0.3
     networks: [radius-net]   # see radius-net's comment above for why not data-net
     environment:
       POSTGRES_DB: radius
@@ -225,6 +250,8 @@ services:
     # "pin every image" policy in docs/11-deployment-recommendations.md.
     image: freeradius/freeradius-server:3.2.10
     restart: unless-stopped
+    mem_limit: 96m
+    cpus: 0.3
     # NOT network_mode: host (deviates from the original docs/13 design -
     # see below). Reaches radius-db via normal Docker DNS on radius-net;
     # its own RADIUS ports are published bound to the WireGuard host IP
@@ -257,6 +284,8 @@ services:
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.3
     networks: [app-net, obs-net]
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -269,6 +298,8 @@ services:
   grafana:
     image: grafana/grafana:latest
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.2
     networks: [app-net, obs-net]
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -281,6 +312,8 @@ services:
   loki:
     image: grafana/loki:latest
     restart: unless-stopped
+    mem_limit: 192m
+    cpus: 0.3
     networks: [obs-net]
     volumes:
       - ./monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
@@ -291,6 +324,8 @@ services:
   promtail:
     image: grafana/promtail:latest
     restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.1
     networks: [obs-net]
     volumes:
       - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro

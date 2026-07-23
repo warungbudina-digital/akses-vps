@@ -1,5 +1,22 @@
 # 09 — Monitoring
 
+## Status: opsional, off by default
+
+Stack ini **tidak jalan by default** di VPS ini — di `docker-compose.reference.yml`
+ke-4 service (`prometheus`, `grafana`, `loki`, `promtail`) ada di belakang
+`profiles: ["monitoring"]`, baru aktif kalau eksplisit `./deploy.sh --monitoring`.
+Alasan: footprint RAM-nya (~500MB–950MB) signifikan dibanding kapasitas VPS
+(2 vCPU/1.9GB) — lihat catatan resource sizing di `docs/05-container-topology.md`.
+
+**Penting**: exporter yang disebut di dokumen ini (`nginx-exporter`,
+`mongodb-exporter`, `redis-exporter`, `mosquitto-exporter`, `node-exporter`,
+`cadvisor`) adalah **desain target, belum ada satupun di
+`docker-compose.reference.yml`** saat ini — cuma 4 base image
+(prometheus/grafana/loki/promtail) yang benar-benar terdefinisi. Kalau
+mengaktifkan profile `monitoring`, exporter-exporter ini masih perlu
+ditambahkan manual sebagai service baru sebelum metrik di bawah benar-benar
+terisi.
+
 ## Stack
 Prometheus (metrics) + Grafana (visualisasi) + Loki/Promtail (log terpusat).
 
@@ -48,7 +65,7 @@ Definisikan Prometheus Alertmanager rules untuk:
 - `up == 0` selama > 2 menit untuk service manapun.
 - gRPC error rate > 5% dalam 5 menit.
 - MongoDB connection pool > 80% kapasitas.
-- Sertifikat Let's Encrypt < 14 hari sebelum expired (`probe_ssl_earliest_cert_expiry` via blackbox_exporter, opsional).
+- Koneksi Cloudflare Tunnel (`cloudflared`) terputus > 2 menit — TLS publik domain UI/API bergantung penuh pada tunnel ini tetap up (tidak ada lagi sertifikat lokal untuk di-monitor expirynya, sejak migrasi dari Let's Encrypt/certbot).
 - Disk usage host > 85%.
 
 ## Retensi
