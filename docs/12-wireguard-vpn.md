@@ -56,31 +56,41 @@ diteruskan ke peer mana).
 > route sendiri ke `10.66.66.0/24`. Belum ada exception peer-to-peer yang
 > terdaftar per tanggal dokumen ini.
 
-### Peer aktif (per 2026-07-23)
+### Peer aktif (per 2026-07-23, pasca pembersihan peer idle)
 
 | Label | IP tunnel | Perangkat | Status |
 |---|---|---|---|
-| ltap-mini | `10.66.66.5`, `192.168.70.0/24` | MikroTik RB912R-2nD (RouterOS 7.7) — **client LAN pribadi**, bukan subscriber-facing: `ether1` + switch tambahan ke laptop, IP camera, media streaming saja, `wlan2` tetap disabled. Lihat catatan RouterOS di bawah. | **terhubung** — handshake ~1 menit lalu, ping dua arah OK |
-| Redmi-Note-5 | `10.66.66.3` | Smartphone Android (Redmi Note 5) — didaftarkan 2026-07-16 (sebelumnya berlabel `redmi-note5-picoclaw`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake ~1 menit lalu |
-| Infinix-Hot-11 | `10.66.66.2` | Smartphone Android (Infinix Hot 11) — didaftarkan 2026-07-20 (sebelumnya berlabel `infinix-smartphone`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake ~2 menit lalu |
-| client50 | `10.66.66.51` | belum terdokumentasi | terdaftar 2026-07-16, idle — handshake terakhir ~5 hari 21 jam lalu |
-| client51 | `10.66.66.52` | belum terdokumentasi | terdaftar 2026-07-18, idle — handshake terakhir ~4 hari 16 jam lalu |
-| client60 | `10.66.66.61` | belum terdokumentasi | terdaftar 2026-07-19, idle — handshake terakhir ~3 hari 14 jam lalu |
-| client61 | `10.66.66.62` | belum terdokumentasi | terdaftar 2026-07-19, idle — handshake terakhir ~2 hari 16 jam lalu |
-| client71 | `10.66.66.72` | belum terdokumentasi | terdaftar 2026-07-21, idle — handshake terakhir ~1 hari 13 jam lalu |
-| client81 | `10.66.66.82` | belum terdokumentasi | terdaftar 2026-07-21, idle — handshake terakhir ~15 jam lalu |
+| ltap-mini | `10.66.66.5`, `192.168.70.0/24` | MikroTik RB912R-2nD (RouterOS 7.7) — **client LAN pribadi**, bukan subscriber-facing: `ether1` + switch tambahan ke laptop, IP camera, media streaming saja, `wlan2` tetap disabled. Lihat catatan RouterOS di bawah. | **terhubung** — handshake ~2 menit lalu, ping dua arah OK |
+| Redmi-Note-5 | `10.66.66.3` | Smartphone Android (Redmi Note 5) — didaftarkan 2026-07-16 (sebelumnya berlabel `redmi-note5-picoclaw`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake <1 menit lalu |
+| Infinix-Hot-11 | `10.66.66.2` | Smartphone Android (Infinix Hot 11) — didaftarkan 2026-07-20 (sebelumnya berlabel `infinix-smartphone`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake ~1 menit lalu |
 
-**Catatan drift 2026-07-11 → 2026-07-23:** peer lama di tabel sebelumnya
-(`client20`/`.21`, `client16`/`.17`, `client1`/`.2` lama, `client2`/`.3` lama,
-`client3`/`.4`, `client7`/`.8`, `client12`/`.13`, `client13`/`.14`) sudah tidak
-ada lagi di `/etc/wireguard/wg0.conf` saat ini — di-deregister di suatu titik
-antara kedua tanggal ini tanpa commit dokumentasi yang menyertainya (`wg0.conf`
-sendiri tidak pernah masuk git — lihat catatan keamanan di bawah). Slot IP
-`10.66.66.2` dan `10.66.66.3` sejak itu didaftarkan ulang untuk device baru
-(sekarang `Infinix-Hot-11` dan `Redmi-Note-5`) — kebetulan sama seperti slot
-`client1`/`client2` versi lama, tapi itu re-registrasi baru, bukan peer yang
-sama. Tabel di atas mencerminkan isi live `wg0.conf` per 2026-07-23, dicek
-langsung lewat `wg show wg0` + `wg0.conf`, bukan disalin dari versi sebelumnya.
+Hanya 3 peer yang tersisa — ini **hasil pembersihan sadar**, bukan drift.
+Semua device sekarang teridentifikasi jelas.
+
+**Pembersihan peer idle (2026-07-23):** 6 peer yang sebelumnya berlabel
+`client50`/`client51`/`client60`/`client61`/`client71`/`client81`
+(`10.66.66.51/52/61/62/72/82`) di-deregister lewat
+`wireguard/deregister-client-peer.sh` setelah audit menemukan mereka
+**tidak pernah teridentifikasi perangkatnya** ("belum terdokumentasi" sejak
+pertama didaftarkan) dan idle 15 jam sampai 6 hari saat dihapus — tidak ada
+satupun yang punya handshake live pada saat pembersihan. Endpoint terakhir
+mereka semua IP Google Cloud (`34.x`/`35.x`), konsisten dengan pola sesi
+Google Cloud Shell test/lab yang disebut di bagian lain dokumen ini. Kalau
+salah satu device ini ternyata masih dibutuhkan, daftarkan ulang dengan
+`register-client-peer.sh` (key baru — key lama tidak disimpan setelah
+deregistrasi) dan **sertakan deskripsi perangkat sejak awal** supaya tidak
+berakhir "belum terdokumentasi" lagi.
+
+**Catatan drift 2026-07-11 → 2026-07-23 (histori sebelum pembersihan di atas):**
+peer yang ada di tabel per 2026-07-11 (`client20`/`.21`, `client16`/`.17`,
+`client1`/`.2` lama, `client2`/`.3` lama, `client3`/`.4`, `client7`/`.8`,
+`client12`/`.13`, `client13`/`.14`) sudah tidak ada lagi sejak sebelum audit
+hari ini — di-deregister di suatu titik tanpa commit dokumentasi yang
+menyertainya (`wg0.conf` sendiri tidak pernah masuk git — lihat catatan
+keamanan di bawah). Slot IP `10.66.66.2` dan `10.66.66.3` sejak itu
+didaftarkan ulang untuk device baru (sekarang `Infinix-Hot-11` dan
+`Redmi-Note-5`) — kebetulan sama seperti slot `client1`/`client2` versi
+lama, tapi itu re-registrasi baru, bukan peer yang sama.
 
 **`pop1` (`10.66.66.10`) sengaja tidak terdaftar saat ini** — slot lama (didaftarkan
 2026-07-08) key-nya hilang saat manual-edit dan sudah di-deregister
