@@ -42,10 +42,10 @@
 set -euo pipefail
 
 # ================= EDIT THESE PER PHONE / PER SESSION =================
-DEVICE_IP="${DEVICE_IP:-10.66.66.2}"     # phone's wg0 TUNNEL ip (NOT its 192.168.x LAN ip)
-PAIR_PORT="${PAIR_PORT:-45191}"          # port from the "Pair device with pairing code" pop-up
-PAIR_CODE="${PAIR_CODE:-280017}"         # 6-digit code from that same pop-up (leave "" if already paired)
-CONNECT_PORT="${CONNECT_PORT:-38619}"    # port from the MAIN Wireless-debugging screen (fill this in!)
+DEVICE_IP="${DEVICE_IP:-10.66.66.N}"     # phone's wg0 TUNNEL ip (NOT its 192.168.x LAN ip)
+PAIR_PORT="${PAIR_PORT:-XXXXX}"          # port from the "Pair device with pairing code" pop-up
+PAIR_CODE="${PAIR_CODE:-XXXXXX}"         # 6-digit code from that same pop-up (leave "" if already paired)
+CONNECT_PORT="${CONNECT_PORT:-XXXXX}"    # port from the MAIN Wireless-debugging screen (fill this in!)
 # =====================================================================
 
 log()  { echo "[adb-wireless] $*"; }
