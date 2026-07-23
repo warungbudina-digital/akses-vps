@@ -64,23 +64,33 @@ perlu expose port 1812/1813 ke publik sama sekali** — cukup bind ke IP WireGua
 
 ## Komponen Baru di `docker-compose.reference.yml`
 
+Desain awal modul ini mengusulkan `network_mode: host` untuk FreeRADIUS.
+**Implementasi nyata tidak memakai itu** — dipakai Docker networking biasa
+plus `ports:` yang di-bind eksplisit ke IP WireGuard, supaya FreeRADIUS
+tetap dapat Docker DNS (perlu resolve `radius-db` dan `grpc-server` by
+name, yang tidak akan jalan dalam mode host networking):
+
 ```yaml
   freeradius:
-    image: freeradius/freeradius-server:3.2
+    image: freeradius/freeradius-server:3.2.10
     restart: unless-stopped
-    network_mode: "host"   # perlu bind persis ke IP wg0 (10.66.66.1), bukan Docker bridge
+    networks: [radius-net, app-net]   # app-net supaya bisa resolve grpc-server via Docker DNS
+    ports:
+      - "10.66.66.1:1812:1812/udp"   # bind ke IP WireGuard spesifik, bukan network_mode: host
+      - "10.66.66.1:1813:1813/udp"
+    env_file: [.env]
     volumes:
-      - ./freeradius/raddb:/etc/raddb:ro
-      - ./freeradius/certs:/etc/raddb/certs:ro
-    environment:
-      - RUN_MODE=debug   # ganti ke default di production untuk logging lebih ringkas
-    depends_on: [mongodb]
+      - ./freeradius/raddb:/etc/freeradius:ro   # NOTE: /etc/freeradius, bukan /etc/raddb (lihat komentar di compose)
+    depends_on: [radius-db, grpc-server]
 ```
 
-> `network_mode: host` dipakai supaya FreeRADIUS bisa listen tepat di
-> `10.66.66.1:1812/1813` (interface WireGuard), bukan di IP internal Docker
-> bridge yang tidak reachable dari PoP. Ini satu-satunya service di stack yang
-> perlu host networking — semua service lain tetap terisolasi seperti biasa.
+> Kenapa bukan `network_mode: host`: itu akan menempatkan FreeRADIUS di
+> host network namespace **tanpa Docker DNS sama sekali** — tidak bisa
+> resolve `radius-db`/`grpc-server` by name. `ports:` binding ke IP
+> `10.66.66.1` spesifik memberi hasil yang sama (cuma reachable dari
+> WireGuard, tidak dari Docker bridge internal) tanpa mengorbankan DNS
+> internal. Detail lengkap ada sebagai komentar inline di
+> `docker-compose.reference.yml` sendiri.
 
 ## Konfigurasi FreeRADIUS (`freeradius/raddb/`)
 
@@ -110,13 +120,14 @@ jadi database GenieACS:
   radius-db:
     image: postgres:16-alpine
     restart: unless-stopped
-    networks: [data-net]
+    networks: [radius-net]   # bukan data-net - lihat catatan radius-net di docker-compose.reference.yml
     environment:
       POSTGRES_DB: radius
       POSTGRES_USER: radius
       POSTGRES_PASSWORD: ${RADIUS_DB_PASSWORD}
     volumes:
       - radius-db-data:/var/lib/postgresql/data
+      - ./freeradius/postgres-init:/docker-entrypoint-initdb.d:ro
 ```
 
 **DAE/CoA** (untuk disconnect paksa dari cloud, mis. dipicu kondisi di GenieACS):
