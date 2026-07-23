@@ -2,11 +2,15 @@
 
 ## Overview
 
-Sistem TR-069/GenieACS berjalan sepenuhnya sebagai **container di dalam MikroTik CHR**, yang sendiri berjalan sebagai VM (guest) di atas VPS Linux (host/hypervisor). Pendekatan ini memberi:
+Sistem TR-069/GenieACS berjalan sebagai **Docker Compose langsung di host
+VPS Linux** — tidak ada MikroTik CHR/RouterOS di jalur manapun (hypervisor
+VPS tidak meng-expose nested virtualization/KVM, jadi CHR tidak bisa
+dijalankan; detail di `docs/11-deployment-recommendations.md` dan
+`docs/12-wireguard-vpn.md`). Pendekatan ini memberi:
 
-- **Isolasi jaringan native** lewat RouterOS firewall/NAT sebelum trafik menyentuh container manapun.
-- **Satu titik kontrol** (CHR) untuk routing, firewall, dan container lifecycle — cocok untuk skenario ISP/TR-069 yang memang sudah lekat dengan MikroTik.
-- **Portabilitas**: seluruh stack (compose reference) tetap bisa dipindah ke Docker/Kubernetes murni jika suatu saat CHR container dianggap membatasi skala.
+- **Firewall host native** (UFW, default-deny) sebelum trafik menyentuh container manapun.
+- **Satu titik kontrol** (Docker Engine di host) untuk container lifecycle, tanpa layer virtualisasi ekstra.
+- **Jalur admin/privat terpisah** lewat WireGuard (`wg0`) — bukan bagian dari trafik publik, lihat `docs/15-alur-akses-wireguard.md`.
 
 ## Layered Architecture
 
@@ -18,64 +22,52 @@ flowchart TB
         MQTTCLIENT[MQTT Clients / Sensors]
     end
 
-    subgraph HOST["VPS Host (Linux, KVM/QEMU)"]
-        subgraph CHR["MikroTik CHR (Guest VM)"]
-            RB["RouterOS: Bridge, NAT, Firewall Filter/RAW, FastTrack, DNS"]
-            subgraph DOCKER["Container Engine (RouterOS Container feature)"]
-                NGINX["nginx (reverse proxy)\nTLS terminate, HTTP/2, WS"]
-                CERTBOT["certbot\n(Let's Encrypt)"]
-                GENIEACS_CWMP["genieacs-cwmp :7547"]
-                GENIEACS_NBI["genieacs-nbi :7557"]
-                GENIEACS_FS["genieacs-fs :7567"]
-                GENIEACS_UI["genieacs-ui :3000"]
-                MONGO["mongodb :27017"]
-                REDIS["redis :6379"]
-                MQTT["mosquitto :1883/8883/9001"]
-                GRPC["grpc-server :50051/8443"]
-                PROM["prometheus"]
-                GRAFANA["grafana"]
-                LOKI["loki"]
-                PROMTAIL["promtail"]
-            end
+    subgraph HOST["VPS Host (Linux) — Docker Engine langsung"]
+        UFW["UFW: default-deny, whitelist 22/7547/51820-udp"]
+        CFTUNNEL["cloudflared (Cloudflare Tunnel)\nTLS publik utk UI/API, no inbound port"]
+        subgraph DOCKER["Docker Engine"]
+            NGINX["nginx (reverse proxy)\nHTTP/2, WS, plain di belakang tunnel/port 7547"]
+            GENIEACS_CWMP["genieacs-cwmp :7547"]
+            GENIEACS_NBI["genieacs-nbi :7557"]
+            GENIEACS_FS["genieacs-fs :7567"]
+            GENIEACS_UI["genieacs-ui :3000"]
+            MONGO["mongodb :27017"]
+            REDIS["redis :6379"]
+            MQTT["mosquitto :1883/8883/9001"]
+            GRPC["grpc-server :50051/8443"]
+            FREERADIUS["freeradius :1812/1813"]
+            RADIUSDB["radius-db (postgres)"]
         end
     end
 
-    CLIENT -->|HTTPS 443| RB
-    CPE -->|TR-069 HTTP/HTTPS 7547| RB
-    MQTTCLIENT -->|MQTTS 8883 / WSS 9001| RB
-    RB -->|dst-nat port-forward| NGINX
+    CLIENT -->|HTTPS, via Cloudflare edge| CFTUNNEL
+    CPE -->|TR-069 HTTP :7547| UFW
+    MQTTCLIENT -->|MQTTS 8883 / WSS 9001, via tunnel/nginx| CFTUNNEL
+    UFW -->|port allow, Docker port-mapping| NGINX
+    CFTUNNEL --> NGINX
     NGINX --> GENIEACS_UI
     NGINX --> GENIEACS_CWMP
     NGINX --> GRPC
     NGINX --> MQTT
-    CERTBOT -.->|writes certs| NGINX
     GENIEACS_CWMP --> MONGO
     GENIEACS_NBI --> MONGO
     GENIEACS_FS --> MONGO
     GENIEACS_UI --> MONGO
     GRPC --> REDIS
     GRPC --> MQTT
-    PROMTAIL --> LOKI
-    PROM --> GRAFANA
-    LOKI --> GRAFANA
+    FREERADIUS --> RADIUSDB
+    GRPC -.-> FREERADIUS
 ```
+
+> Monitoring (Prometheus/Grafana/Loki/Promtail) sengaja tidak digambar di
+> jalur utama — stack ini opsional (`profiles: ["monitoring"]` di
+> `docker-compose.reference.yml`), off by default karena footprint RAM-nya
+> signifikan dibanding kapasitas VPS. Lihat `docs/09-monitoring.md`.
 
 ## Design Principles
 
-1. **Single public ingress**: hanya `nginx` yang punya rute keluar dari MikroTik (via dst-nat). Semua service lain — MongoDB, Redis, GenieACS NBI/FS internal — **tidak pernah** di-expose langsung ke internet.
-2. **Defense in depth**: RouterOS firewall (filter + raw) → Nginx security headers & rate-limit → container-level (non-root, read-only fs) → application-level auth (JWT/API key/MQTT ACL).
-3. **Service discovery by name**: semua container berada di satu Docker network (`container-network`) dan saling memanggil lewat DNS internal Docker (`mongodb:27017`, dst), tidak pernah pakai IP statis.
-4. **Stateless where possible**: `grpc-server` dan `nginx` stateless, gampang di-scale horizontal; state hidup di `mongodb`, `redis`, dan `mosquitto` (persistent volume).
-5. **Observability built-in**: setiap container mengirim log ke Loki (via Promtail/driver) dan metrik ke Prometheus sejak hari pertama, bukan ditambahkan belakangan.
-
-## Kenapa CHR + Container (bukan VPS + Docker langsung)?
-
-| Aspek | CHR + Container | VPS + Docker langsung |
-|---|---|---|
-| Kontrol trafik ISP-grade (queue, PPPoE, hotspot, VPN) | Native RouterOS | Perlu tooling tambahan |
-| Firewall/NAT granular | RouterOS filter+raw, sangat matang | iptables/nftables manual |
-| Familiar untuk tim yang sudah pakai MikroTik | Ya | Perlu belajar stack baru |
-| Kematangan ekosistem container | Terbatas (RouterOS container masih baru, single network interface per container secara native) | Penuh (Docker Compose/K8s) |
-| Rekomendasi | Cocok kalau CHR memang jadi router utama/edge | Cocok kalau container adalah fokus utama |
-
-> **Catatan penting**: RouterOS container feature (sejak v7.x) berjalan di atas container engine internal (bukan Docker Engine penuh) dan **satu container = satu veth interface**, tidak ada Docker Compose native. Karena itu dokumen ini menyediakan **docker-compose.reference.yml** sebagai referensi arsitektur/dependency graph, sementara deployment sesungguhnya ke CHR dilakukan per-container lewat `/container add` (lihat `mikrotik/routeros-chr.rsc`). Untuk kemudahan maintenance jangka panjang, opsi yang lebih matang secara operasional adalah menjalankan Docker Engine di **host VPS Linux**, dan CHR hanya berperan sebagai **router/firewall edge di depan host** (trafik masuk → CHR filter/NAT → forward ke Docker bridge di host). Kedua topologi dijelaskan di `docs/11-deployment-recommendations.md`; RouterOS container tetap didukung penuh untuk kasus di mana isolasi total dalam satu VM CHR memang menjadi requirement.
+1. **Single public ingress per jalur**: `nginx` (via Cloudflare Tunnel untuk UI/API, via UFW port `7547` langsung untuk CWMP) adalah satu-satunya titik masuk trafik publik. Semua service lain — MongoDB, Redis, GenieACS NBI/FS internal, FreeRADIUS — **tidak pernah** di-expose langsung ke internet.
+2. **Defense in depth**: UFW (host, default-deny) → Cloudflare edge (untuk domain yang lewat tunnel) → Nginx security headers & rate-limit → container-level (non-root, read-only fs) → application-level auth (JWT/API key/MQTT ACL).
+3. **Service discovery by name, network tersegmentasi**: container terbagi ke beberapa Docker network sesuai trust zone (`edge-net`, `app-net`, `data-net`, `obs-net`, `radius-net` — lihat `docs/05-container-topology.md`), saling memanggil lewat DNS internal Docker, tidak pernah pakai IP statis.
+4. **Stateless where possible**: `grpc-server` dan `nginx` stateless, gampang di-scale horizontal; state hidup di `mongodb`, `redis`, `mosquitto`, dan `radius-db` (persistent volume).
+5. **Observability opsional, bukan wajib**: Loki/Prometheus/Grafana tersedia sebagai profile terpisah, diaktifkan kalau resource VPS memungkinkan — bukan diasumsikan selalu jalan sejak hari pertama.

@@ -1,14 +1,13 @@
 # =====================================================================
-# REFERENCE ONLY — menggambarkan dependency graph & konfigurasi service.
-# Deployment akhir ke MikroTik CHR dilakukan per-container lewat
-# `/container add` (lihat mikrotik/routeros-chr.rsc) KARENA RouterOS
-# Container tidak punya orchestrator Compose native.
+# File compose yang benar-benar dipakai (bukan cuma referensi) — dijalankan
+# langsung di host VPS Linux lewat `docker compose -f
+# docker-compose.reference.yml up -d` (atau `deploy.sh`), tanpa MikroTik
+# CHR/RouterOS di jalur manapun. Firewall/NAT edge ditangani UFW di host +
+# Cloudflare Tunnel (lihat docs/01, docs/11).
 #
-# File ini tetap berguna untuk:
-#   - development lokal (docker compose up)
-#   - dijalankan di VPS host langsung (topologi alternatif, lihat
-#     docs/11-deployment-recommendations.md) dengan CHR hanya sebagai
-#     router/firewall edge di depan host Docker.
+# Nama file dipertahankan "reference" karena juga dipakai sebagai
+# dependency graph/dokumentasi arsitektur (docs/05), bukan berarti isinya
+# sekadar contoh yang tidak dijalankan sungguhan.
 # =====================================================================
 networks:
   edge-net:

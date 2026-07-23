@@ -22,8 +22,6 @@ akses-vps/
 │   ├── 13-accel-ppp-integration.md
 │   ├── 14-ssh-access-rotation.md
 │   └── 15-alur-akses-wireguard.md
-├── mikrotik/
-│   └── routeros-chr.rsc
 ├── wireguard/
 │   ├── client-setup.sh          # dijalankan di client (mis. Cloud Shell)
 │   ├── register-client-peer.sh  # dijalankan di server, tambah peer baru

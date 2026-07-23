@@ -40,8 +40,8 @@ scrape_configs:
 
 # Catatan: exporter (nginx-exporter, mongodb-exporter, redis-exporter,
 # mosquitto-exporter, node-exporter, cadvisor) adalah container sidecar
-# tambahan opsional — tambahkan ke docker-compose.reference.yml /
-# routeros-chr.rsc sesuai kebutuhan. Semuanya join `obs-net` saja.
+# tambahan opsional — tambahkan ke docker-compose.reference.yml sesuai
+# kebutuhan. Semuanya join `obs-net` saja.
 
   # --- accel-ppp / RADIUS (lihat docs/13-accel-ppp-integration.md) ---
   # Target berada di belakang WireGuard (10.66.66.0/24) — Prometheus perlu

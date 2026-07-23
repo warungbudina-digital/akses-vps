@@ -1,13 +1,19 @@
 # 08 — Security Hardening Checklist
 
 ## Network / Edge
-- [ ] MikroTik firewall filter: default `DROP` di `input` dan `forward`, whitelist eksplisit saja (`mikrotik/routeros-chr.rsc`).
-- [ ] RAW firewall buang paket invalid sebelum conntrack (SYN+FIN, FIN tanpa ACK, dst).
-- [ ] `admin-allowed` address-list dibatasi ke IP kantor/VPN, bukan `0.0.0.0/0`.
-- [ ] SSH & Winbox RouterOS hanya dari `admin-allowed`, port default diganti bila perlu.
-- [ ] FastTrack **tidak** diaktifkan untuk trafik yang butuh inspeksi L7 penuh.
-- [ ] IPv6 firewall dikonfigurasi paralel dengan IPv4 (jangan sampai IPv6 "lupa" di-filter).
-- [ ] Hanya `nginx` yang dst-nat dari WAN; tidak ada service lain yang di-port-forward langsung.
+
+Tidak ada MikroTik CHR/RouterOS di VPS ini (hypervisor tidak expose nested
+virtualization — lihat `docs/01-architecture.md`); firewall edge ditangani
+UFW di host Linux + WireGuard untuk jalur admin/privat. Item di bawah
+sudah diverifikasi live, bukan cuma target:
+
+- [x] UFW default `deny (incoming)`, whitelist eksplisit saja: `22/tcp` (SSH), `7547/tcp` (CWMP), `51820/udp` (WireGuard) — tidak ada `0.0.0.0/0` untuk service lain.
+- [x] IPv6 di-whitelist paralel dengan IPv4 untuk ketiga port yang sama (`ufw status` menunjukkan entri `(v6)` untuk masing-masing, jangan sampai IPv6 "lupa" di-filter).
+- [x] Hanya `nginx` yang publish port ke host (`7547`); semua service lain (mongodb, redis, genieacs-*, freeradius, radius-db) **tidak** ada published port sama sekali — cek berkala dengan `docker ps` (kolom PORTS harus kosong untuk service ini).
+- [x] SSH hanya key-based auth (ed25519), tidak ada password auth aktif — kehilangan satu-satunya private key = lockout total kecuali ada akses console provider (lihat `docs/14-ssh-access-rotation.md`).
+- [ ] `fail2ban` saat ini cuma jail `sshd` — pertimbangkan tambahan jail untuk brute-force HTTP auth (nginx `limit_req` sudah membantu, tapi bukan pengganti fail2ban).
+- [x] WireGuard hub-and-spoke: tiap peer `AllowedIPs` dibatasi `/32` (kecuali gateway LAN seperti `ltap-mini`), peer tidak bisa saling reach satu sama lain — lihat `docs/12-wireguard-vpn.md`.
+- [ ] Untuk trafik volume tinggi (mass-inform CPE), pastikan `nf_conntrack_max` di host cukup besar — tidak ada FastTrack RouterOS di sini, conntrack Linux biasa yang menangani established/related.
 
 ## TLS
 - [ ] `ssl_protocols TLSv1.2 TLSv1.3;` — TLS 1.0/1.1 dimatikan.

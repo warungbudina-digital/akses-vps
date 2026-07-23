@@ -1,51 +1,69 @@
 # 11 — Rekomendasi Deployment Production
 
-## Dua Topologi yang Didukung
+## Topologi yang Dipakai: Docker Engine Langsung di Host VPS
 
-### A. Full RouterOS Container (CHR menjalankan semua container)
-**Pilih ini jika**: CHR memang harus jadi satu-satunya VM (lisensi/biaya VPS terbatas ke 1 instance), atau tim sudah sangat familiar RouterOS dan ingin semua kontrol (network+compute) dalam satu tempat.
+Desain awal dokumen ini mempertimbangkan MikroTik CHR (RouterOS Cloud Hosted
+Router) sebagai edge router/firewall, dengan dua varian: CHR menjalankan
+seluruh container (RouterOS Container feature), atau CHR sekadar router di
+depan host Docker. **Keduanya butuh CHR jalan sebagai guest VM, yang artinya
+butuh nested virtualization (KVM/VT-x) di-expose oleh hypervisor VPS.**
 
-Kelebihan: satu titik manajemen, isolasi network native RouterOS.
-Kekurangan: RouterOS Container belum punya orchestrator setara Compose/K8s — scaling, rolling update, dan dependency ordering harus diatur manual lewat script/scheduler RouterOS; ekosistem monitoring/tooling container kurang matang dibanding Docker Engine murni.
+Pada instance nyata (AKSES-VPS), hypervisor **tidak** meng-expose
+VT-x/AMD-V ke guest (`grep vmx/svm /proc/cpuinfo` kosong, `/dev/kvm` tidak
+ada) — CHR tidak bisa dijalankan dengan wajar (hanya lewat emulasi software
+QEMU/TCG yang sangat lambat, tidak layak untuk router). Detail lengkap
+temuan ini ada di `docs/12-wireguard-vpn.md`.
 
-### B. CHR sebagai Edge Router + Host VPS menjalankan Docker (REKOMENDASI untuk production serius)
-**Pilih ini jika**: prioritas adalah kemudahan maintenance, observability matang, dan skalabilitas jangka panjang.
+**Topologi yang benar-benar dipakai:**
 
-Topologi:
 ```
-Internet -> VPS public IP -> MikroTik CHR (VM, firewall/NAT/QoS)
+Internet -> VPS public IP -> UFW (host Linux, default-deny, whitelist
+                              22/tcp, 7547/tcp, 51820/udp)
                                    |
-                                   v (forward ke bridge/NIC kedua atau
-                                      hairpin NAT ke host)
-                              VPS Host (Docker Engine + docker-compose.reference.yml
-                              dijalankan langsung, bukan hanya referensi)
+                                   v
+                              Docker Engine (host VPS Linux)
+                              docker-compose.reference.yml dijalankan
+                              LANGSUNG (bukan cuma referensi), lengkap
+                              healthcheck + restart policy
 ```
-CHR tetap menjalankan **seluruh** firewall filter/raw/NAT/FastTrack seperti didokumentasikan, tapi trafik yang lolos di-forward ke Docker Engine yang berjalan di host VPS (via bridge interface CHR-host, bukan lagi veth per-container). Semua container di `docker-compose.reference.yml` benar-benar dipakai (bukan cuma referensi), lengkap dengan Compose healthcheck, restart policy, dan resource limit.
 
-Kelebihan: full Docker ecosystem (Compose/Swarm/K8s kalau perlu scale lebih jauh), tooling monitoring lebih lengkap, image dari registry publik langsung kompatibel, CI/CD lebih mudah (build & push image, `docker compose pull && up -d`).
-Kekurangan: satu layer virtualisasi ekstra (CHR tetap jalan sebagai VM) dibanding native RouterOS hardware.
+Firewall/NAT edge yang di desain awal direncanakan lewat RouterOS sekarang
+ditangani dua hal:
+- **UFW** (host) — default-deny, whitelist port eksplisit, plus `fail2ban`
+  untuk brute-force SSH.
+- **Cloudflare Tunnel** (`cloudflared`) — TLS publik + proteksi edge untuk
+  domain UI/API (`acs`, `api`, `fs.obc-crypto.com`), menggantikan peran
+  certbot/Let's Encrypt lokal. Koneksi keluar saja ke edge Cloudflare,
+  tidak ada port tambahan yang perlu di-publish untuk domain-domain ini.
+- **WireGuard** (`wg0`, native kernel Linux) — bukan pengganti firewall
+  edge, tapi jalur terpisah untuk akses admin/privat (lihat
+  `docs/12-wireguard-vpn.md` dan `docs/15-alur-akses-wireguard.md`).
 
-> **Rekomendasi tim**: mulai dengan **Topologi B** untuk kecepatan development dan maintenance, terutama karena `grpc-server` custom butuh iterasi cepat (build-test-deploy). Topologi A tetap didukung penuh (`mikrotik/routeros-chr.rsc`) untuk kasus di mana constraint infrastruktur mengharuskan semuanya dalam satu CHR.
+Kalau di masa depan migrasi ke VPS provider yang **memang** meng-expose
+nested virtualization, CHR sebagai edge router tetap bisa dipertimbangkan
+lagi sebagai opsi arsitektur — tapi itu keputusan baru untuk lingkungan
+baru, bukan sesuatu yang dipertahankan sebagai kode/config siap pakai di
+repo ini.
 
 ## Sizing VPS Awal
 | Skala (jumlah CPE aktif) | vCPU | RAM | Disk | Catatan |
 |---|---|---|---|---|
 | < 500 | 4 | 8 GB | 80 GB SSD | Sesuai sizing di `docs/05-container-topology.md` |
 | 500 – 5.000 | 8 | 16 GB | 160 GB SSD | Pisahkan MongoDB ke VM/volume terpisah, pertimbangkan replica set |
-| > 5.000 | 16+ | 32 GB+ | 320 GB+ NVMe | genieacs-cwmp perlu > 1 instance di belakang load balancer L4 (MikroTik dapat load-balance TCP ke beberapa backend cwmp) |
+| > 5.000 | 16+ | 32 GB+ | 320 GB+ NVMe | genieacs-cwmp perlu > 1 instance di belakang load balancer L4 (mis. HAProxy/nginx `stream` module ke beberapa backend cwmp) |
 
 ## Performa Tinggi, Resource Rendah
 1. **genieacs-cwmp** adalah bottleneck utama saat mass-inform — beri CPU limit lebih tinggi dibanding service lain, dan pertimbangkan multiple replica di belakang nginx `upstream` dengan `least_conn` bila CPE > 2.000.
 2. **MongoDB** — pastikan index (`mongodb/init/01-create-users.js`) terpasang; index yang hilang adalah penyebab #1 GenieACS lambat saat device banyak.
 3. **Redis** dipakai untuk cache ringan (rate-limit, session) — bukan primary store, jadi `maxmemory-policy allkeys-lru` aman diset agar tidak OOM.
 4. **Nginx** `worker_processes auto` + `sendfile`/`tcp_nopush` sudah di-tune di `nginx/nginx.conf`; jangan aktifkan modul yang tidak dipakai (mis. modul image processing) untuk kurangi footprint.
-5. **FastTrack** di MikroTik signifikan menghemat CPU untuk trafik established/related — pastikan tetap aktif di production, hanya nonaktifkan sementara saat debugging paket-level.
+5. **UFW/conntrack di host** — untuk trafik established/related bervolume tinggi, pastikan `nf_conntrack_max` cukup besar (`sysctl net.netfilter.nf_conntrack_max`) supaya tidak jadi bottleneck saat mass-inform CPE; ini pengganti peran FastTrack RouterOS di desain awal.
 
 ## Kemudahan Maintenance
 - Semua image di-pin ke tag spesifik (bukan `:latest`) sebelum go-live — `latest` di file referensi ini sengaja dipakai untuk kejelasan dokumentasi, ganti ke versi terkunci (mis. `mongo:7.0.12`) saat deploy sungguhan.
 - CI/CD minimal: build `grpc-server` image → push ke registry privat → `docker compose pull && docker compose up -d --no-deps grpc-server` (zero-downtime untuk service stateless).
 - Staging environment terpisah (VPS kecil) untuk uji upgrade GenieACS/MongoDB sebelum ke production.
-- Dokumentasikan setiap perubahan RouterOS lewat `/export` yang di-commit ke git (`mikrotik/routeros-chr.rsc` sebagai source of truth, bukan hanya hasil klik-klik Winbox).
+- Dokumentasikan setiap perubahan UFW/WireGuard yang signifikan (bukan cuma di-`iptables`/`wg` langsung tanpa jejak) — lihat `docs/12-wireguard-vpn.md` untuk konvensi registrasi peer via script, bukan edit manual.
 
 ## Skalabilitas Jangka Panjang
 - Kalau CPE terus bertambah, pisahkan **data plane** (mongodb, redis) ke VM/managed service terpisah dari **control plane** (genieacs-*, grpc-server, nginx) agar bisa di-scale independen.

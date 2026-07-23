@@ -6,16 +6,16 @@
 sequenceDiagram
     autonumber
     participant CPE
-    participant MT as MikroTik CHR (Firewall/NAT)
-    participant NG as nginx (TLS terminate)
+    participant MT as VPS Host (UFW allow 7547 + Docker port-map)
+    participant NG as nginx (proxy_pass plain HTTP)
     participant CWMP as genieacs-cwmp
     participant DB as MongoDB
     participant NBI as genieacs-nbi
     participant UI as genieacs-ui / Operator
 
-    CPE->>MT: TCP SYN :7547 (atau :443 jika via SNI cwmp.domain.com)
-    MT->>MT: firewall filter (raw prerouting: drop invalid, allow established)
-    MT->>NG: dst-nat forward
+    CPE->>MT: TCP SYN :7547
+    MT->>MT: UFW allow (default-deny, hanya 22/7547/51820-udp yang whitelist)
+    MT->>NG: Docker port-map forward (bukan hop RouterOS terpisah, di host yang sama)
     NG->>CWMP: proxy_pass http (internal, plain HTTP di belakang TLS)
     CPE->>CWMP: SOAP/HTTP Inform (DeviceId, Events: 0 BOOTSTRAP / 1 BOOT / 4 VALUE CHANGE / 6 CONNECTION REQUEST)
     CWMP->>DB: upsert device doc (_id = OUI-SerialNumber)
@@ -40,14 +40,14 @@ sequenceDiagram
     participant NBI as genieacs-nbi
     participant DB as MongoDB
     participant CWMP as genieacs-cwmp
-    participant MT as MikroTik (NAT/Firewall)
+    participant NET as Internet/NAT ISP (di sisi CPE, bukan di VPS)
     participant CPE
 
     Operator->>NBI: POST /devices/{id}/tasks (task baru)
     NBI->>DB: simpan task, set pending
     NBI->>CWMP: trigger connection request ke ConnectionRequestURL milik CPE
-    CWMP->>MT: HTTP GET ke IP:port CPE (butuh CPE reachable — biasanya via STUN/NAT traversal jika CPE di belakang NAT ISP)
-    MT-->>CPE: forward (bila ada port-forward / STUN binding)
+    CWMP->>NET: HTTP GET ke IP:port CPE (butuh CPE reachable — biasanya via STUN/NAT traversal jika CPE di belakang NAT ISP)
+    NET-->>CPE: forward (bila ada port-forward / STUN binding di sisi ISP/CPE)
     CPE->>CWMP: buka sesi Inform baru (Event: 6 CONNECTION REQUEST)
     Note over CWMP,CPE: lanjut seperti alur Inform di atas — task dieksekusi saat sesi ini
 ```

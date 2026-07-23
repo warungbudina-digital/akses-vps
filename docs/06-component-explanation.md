@@ -29,5 +29,24 @@ Cache & ephemeral store: rate-limit counter untuk grpc-server, session token bla
 - **Grafana**: dashboard terpusat (CPU/RAM/Network per container, MQTT throughput, GenieACS inform rate, gRPC latency, Mongo ops).
 - **Loki + Promtail**: centralized logging — semua container log ke stdout/stderr, Promtail men-tail Docker log driver dan push ke Loki, di-query lewat Grafana Explore.
 
-## 9. MikroTik CHR
-Edge router/firewall: terminasi WAN, NAT, firewall filter+raw, FastTrack untuk trafik established/related, DNS caching, dan (tergantung topologi yang dipilih — lihat `docs/01-architecture.md`) tempat container berjalan atau sekadar router di depan host Docker.
+## 9. UFW (Host Firewall)
+Firewall native Linux di host VPS — default-deny, whitelist eksplisit
+(`22/tcp`, `7547/tcp`, `51820/udp`). Menggantikan peran firewall/NAT edge
+yang di desain awal direncanakan lewat MikroTik CHR — CHR tidak dipakai di
+VPS ini karena hypervisor tidak meng-expose nested virtualization/KVM
+(lihat `docs/01-architecture.md` dan `docs/12-wireguard-vpn.md`).
+Dilengkapi `fail2ban` untuk brute-force SSH.
+
+## 10. WireGuard (wg0)
+VPN native kernel Linux (bukan container) untuk akses **admin/privat** —
+terpisah total dari trafik produksi TR-069/GenieACS. Dipakai untuk reach
+LAN pribadi di belakang perangkat MikroTik fisik milik client (`ltap-mini`),
+akses langsung ke host VPS, dan kontrol smartphone via ADB. Detail
+konfigurasi di `docs/12-wireguard-vpn.md`, contoh alur trafik lengkap di
+`docs/15-alur-akses-wireguard.md`.
+
+## 11. Cloudflare Tunnel (cloudflared)
+Menangani TLS publik untuk domain UI/API (`acs`, `api`, `fs.obc-crypto.com`)
+— menggantikan Let's Encrypt/certbot lokal. Koneksi outbound-only dari host
+ke edge Cloudflare, tidak ada port inbound tambahan yang perlu dibuka di
+UFW untuk domain-domain ini.

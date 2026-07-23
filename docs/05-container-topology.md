@@ -55,7 +55,7 @@ graph TD
 
 ## Container Bridge Membership
 
-| Container | edge-net | app-net | data-net | obs-net | Publish Port ke Host/CHR |
+| Container | edge-net | app-net | data-net | obs-net | Publish Port ke Host |
 |---|:-:|:-:|:-:|:-:|---|
 | nginx | ✅ | ✅ | ❌ | ❌ | 80, 443, 7547 |
 | certbot | ✅ | ❌ | ❌ | ❌ | (tidak listen, jalan sebagai job) |
