@@ -16,11 +16,17 @@ sudah diverifikasi live, bukan cuma target:
 - [ ] Untuk trafik volume tinggi (mass-inform CPE), pastikan `nf_conntrack_max` di host cukup besar — tidak ada FastTrack RouterOS di sini, conntrack Linux biasa yang menangani established/related.
 
 ## TLS
-- [ ] `ssl_protocols TLSv1.2 TLSv1.3;` — TLS 1.0/1.1 dimatikan.
-- [ ] Cipher suite modern (ECDHE + AEAD saja), `ssl_prefer_server_ciphers on`.
-- [ ] HSTS aktif dengan `includeSubDomains` dan `preload` (submit ke hstspreload.org setelah stabil).
-- [ ] Sertifikat auto-renew tervalidasi jalan (`certbot renew --dry-run` rutin).
-- [ ] MQTT TLS (8883) pakai `tls_version tlsv1.3`.
+
+`nginx` di deployment ini **tidak** terminate TLS sama sekali (tidak ada
+`listen ... ssl` di `nginx/conf.d/*.conf`, semua plain `listen 80`/`7547`)
+— TLS publik untuk domain UI/API ditangani **Cloudflare Tunnel** di edge,
+bukan certbot/Let's Encrypt lokal seperti desain awal. Item TLS jadi dua
+kelompok:
+
+- [ ] **Sisi Cloudflare (dashboard Zero Trust/SSL-TLS)**: mode enkripsi minimal "Full" (idealnya "Full (strict)" kalau origin sudah punya cert), TLS 1.2/1.3 minimum, HSTS `includeSubDomains` diaktifkan di edge.
+- [ ] `nginx/nginx.conf` masih punya baris `ssl_protocols`/`ssl_ciphers`/`ssl_stapling` dkk. peninggalan desain TLS-di-nginx yang lama — **tidak aktif** (tidak ada server block yang pakai `listen ssl`), pertimbangkan dihapus supaya tidak menyesatkan pembaca config.
+- [ ] CWMP jalur langsung port `7547` (untuk CPE tanpa SNI/TLS modern) **plain HTTP, tanpa TLS sama sekali** — risiko yang diterima sadar untuk kompatibilitas CPE lawas, bukan oversight; pastikan payload yang lewat jalur ini tidak berisi data sensitif di luar protokol TR-069 itu sendiri.
+- [ ] MQTT TLS (8883) **saat ini dinonaktifkan** di `mosquitto/config/mosquitto.conf` (cert domain asli belum ada) — kalau diaktifkan lagi, `tls_version tlsv1.3` dan sumber sertifikat perlu direncanakan ulang (bukan lagi dari certbot, folder itu sudah tidak ada).
 
 ## Authentication & Authorization
 - [ ] MongoDB `authorization: enabled`, user least-privilege terpisah per konsumen (`genieacs` readWrite, `grpc_readonly` read-only) — **bukan** root user dipakai aplikasi.

@@ -126,10 +126,8 @@ akses-vps/
 
 Tidak ada lagi folder `certbot/` — TLS publik sekarang ditangani Cloudflare
 Tunnel (`cloudflared`, konfigurasi cukup lewat `CLOUDFLARE_TUNNEL_TOKEN` di
-`.env`), bukan Let's Encrypt lokal. Diagram arsitektur umum di `docs/01` dan
-`docs/05` tetap menyebut `certbot` sebagai bagian topologi referensi (opsi
-kalau suatu saat deploy tanpa Cloudflare) - itu bukan klaim bahwa folder ini
-ada di repo.
+`.env`), bukan Let's Encrypt lokal. Lihat `docs/06-component-explanation.md`
+komponen 4 untuk detail migrasinya.
 
 ## Konvensi
 

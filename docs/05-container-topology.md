@@ -4,7 +4,6 @@
 graph TD
     subgraph edge-net["Docker network: edge-net (public-facing)"]
         NGINX[nginx]
-        CERTBOT[certbot]
     end
 
     subgraph app-net["Docker network: app-net (application)"]
@@ -57,8 +56,7 @@ graph TD
 
 | Container | edge-net | app-net | data-net | obs-net | Publish Port ke Host |
 |---|:-:|:-:|:-:|:-:|---|
-| nginx | ✅ | ✅ | ❌ | ❌ | 80, 443, 7547 |
-| certbot | ✅ | ❌ | ❌ | ❌ | (tidak listen, jalan sebagai job) |
+| nginx | ✅ | ✅ | ❌ | ❌ | 7547 (80/443 tidak di-publish — TLS domain UI/API ditangani Cloudflare Tunnel, lihat `docs/06`) |
 | grpc-server | ❌ | ✅ | ✅ (khusus redis/mongo) | ✅ (expose /metrics) | tidak ada (internal only) |
 | mosquitto | ❌ | ✅ | ❌ | ✅ | tidak ada (diakses via nginx WS proxy) |
 | genieacs-cwmp | ❌ | ✅ | ✅ | ✅ | tidak ada |

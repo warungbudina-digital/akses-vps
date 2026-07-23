@@ -9,8 +9,15 @@ Broker pesan untuk event real-time (mis. status device, command dari backend ke 
 ## 3. Nginx Reverse Proxy
 Satu-satunya pintu masuk publik. Melakukan TLS termination, HTTP/2, proxy WebSocket (upgrade header), gzip, rate-limiting (`limit_req_zone`), security headers (HSTS, CSP, X-Frame-Options, dst), proxy buffering yang di-tune, serta access/error log terstruktur (dikirim ke Loki via Promtail).
 
-## 4. Let's Encrypt (Certbot)
-Menerbitkan & memperbarui sertifikat otomatis untuk semua subdomain (`acs`, `cwmp`, `mqtt`, `api`, `grafana`, `prometheus`). Mode **webroot** atau **standalone dengan pre/post hook** untuk reload nginx setelah renewal. Sertifikat disimpan di volume bersama yang di-mount read-only ke nginx.
+## 4. TLS Publik — Cloudflare Tunnel, bukan Certbot
+
+Desain awal dokumen ini memakai Let's Encrypt/Certbot untuk TLS publik.
+Deployment nyata sekarang memakai **Cloudflare Tunnel** sebagai gantinya
+(lihat komponen 11 di bawah) — tidak ada Certbot, tidak ada volume
+sertifikat lokal, tidak ada folder `certbot/` di repo ini. Alasan migrasi:
+menghindari ketergantungan renewal cron + reload nginx yang bisa gagal
+diam-diam, dan sekaligus menghilangkan kebutuhan publish port 443/80 ke
+WAN sama sekali untuk domain UI/API.
 
 ## 5. GenieACS Slim (cwmp, ui, fs, nbi)
 - **genieacs-cwmp** (`:7547`): endpoint yang menerima Inform dari CPE, implementasi protokol CWMP.
