@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Backup harian: MongoDB, konfigurasi WireGuard, konfigurasi GenieACS,
-# dan seluruh Docker named volume yang relevan.
+# Backup harian: MongoDB, konfigurasi WireGuard, ADB keypair, credential
+# lokal non-git, konfigurasi GenieACS, dan seluruh Docker named volume
+# yang relevan.
 #
 # Tidak lagi backup sertifikat TLS - sejak migrasi ke Cloudflare Tunnel,
 # TLS publik ditangani Cloudflare edge, tidak ada lagi sertifikat lokal
@@ -87,12 +88,24 @@ else
   echo "warn: ${ADB_KEY_DIR}/adbkey tidak terbaca - ADB keypair TIDAK ter-backup" >&2
 fi
 
-# 4. Konfigurasi GenieACS (preset/provision/vparam disimpan di Mongo — sudah
+# 4. Credential lokal non-git (docs/.local-credentials/) - kredensial yang
+#    sengaja TIDAK di-commit (gitignored) tapi harus selamat saat migrasi,
+#    mis. SSH credential ke host lain seperti DB-VPS. File di-tar dengan
+#    permission dijaga (arsip 600). Di-skip kalau folder belum ada.
+echo "-> Local credentials"
+if [ -d "${REPO_ROOT}/docs/.local-credentials" ]; then
+  tar czf "${DEST}/local-credentials-${DATE}.tar.gz" -C "${REPO_ROOT}/docs" .local-credentials
+  chmod 600 "${DEST}/local-credentials-${DATE}.tar.gz"
+else
+  echo "   skip: docs/.local-credentials/ tidak ada"
+fi
+
+# 5. Konfigurasi GenieACS (preset/provision/vparam disimpan di Mongo — sudah
 #    tercakup di dump di atas — bagian ini backup file env/config statis)
 echo "-> GenieACS config"
 tar czf "${DEST}/genieacs-config-${DATE}.tar.gz" genieacs/genieacs.env genieacs/examples 2>/dev/null || true
 
-# 5. Docker named volume. Nama sudah di-prefix project. Volume yang belum ada
+# 6. Docker named volume. Nama sudah di-prefix project. Volume yang belum ada
 #    (mis. monitoring stack belum di-start) di-SKIP eksplisit - jangan biarkan
 #    `docker run -v` membuat volume kosong lalu men-tar-nya (backup kosong
 #    diam-diam). radius-db-data & mosquitto-log ikut, sebelumnya terlewat.
@@ -110,13 +123,13 @@ for SHORT in mongo-data redis-data mosquitto-data mosquitto-log radius-db-data \
     || echo "warn: gagal backup volume ${VOL}" >&2
 done
 
-# 6. Upload offsite (opsional)
+# 7. Upload offsite (opsional)
 if [ -n "${S3_BUCKET}" ]; then
   echo "-> Upload ke S3: ${S3_BUCKET}"
   aws s3 cp "${DEST}" "s3://${S3_BUCKET}/akses-vps/${DATE}/" --recursive
 fi
 
-# 7. Retensi lokal
+# 8. Retensi lokal
 echo "-> Bersihkan backup lokal > ${RETENTION_DAYS} hari"
 find "${BACKUP_ROOT}" -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" -exec rm -rf {} \;
 

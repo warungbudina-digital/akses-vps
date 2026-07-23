@@ -46,6 +46,13 @@ echo "  chmod 600 \${ADB_KEY_DIR:-/home/warungbudina/.android}/adbkey"
 echo "  adb kill-server && adb start-server   # supaya adb server pakai key yang di-restore"
 
 echo
+echo "Restore credential lokal non-git (docs/.local-credentials/, mis. SSH"
+echo "credential DB-VPS) - manual, pulihkan ke dalam repo:"
+echo "  Backup arsip: ${SRC}/local-credentials-*.tar.gz"
+echo "  tar xzf ${SRC}/local-credentials-*.tar.gz -C ${REPO_ROOT}/docs"
+echo "  chmod -R 600 ${REPO_ROOT}/docs/.local-credentials/*"
+
+echo
 echo "Restore Docker volumes lain (pilih manual sesuai kebutuhan):"
 ls "${SRC}"/volume-*.tar.gz 2>/dev/null || echo "  (tidak ada arsip volume)"
 echo "Contoh (nama volume harus di-prefix project, mis. ${COMPOSE_PROJECT}_redis-data):"
