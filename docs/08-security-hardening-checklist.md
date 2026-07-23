@@ -24,7 +24,7 @@ bukan certbot/Let's Encrypt lokal seperti desain awal. Item TLS jadi dua
 kelompok:
 
 - [ ] **Sisi Cloudflare (dashboard Zero Trust/SSL-TLS)**: mode enkripsi minimal "Full" (idealnya "Full (strict)" kalau origin sudah punya cert), TLS 1.2/1.3 minimum, HSTS `includeSubDomains` diaktifkan di edge.
-- [ ] `nginx/nginx.conf` masih punya baris `ssl_protocols`/`ssl_ciphers`/`ssl_stapling` dkk. peninggalan desain TLS-di-nginx yang lama — **tidak aktif** (tidak ada server block yang pakai `listen ssl`), pertimbangkan dihapus supaya tidak menyesatkan pembaca config.
+- [x] `nginx/nginx.conf` sudah dibersihkan dari baris `ssl_protocols`/`ssl_ciphers`/`ssl_stapling`/`resolver` yang inert (tidak ada server block yang pakai `listen ssl`) — dihapus, sudah di-reload live tanpa downtime, `nginx -t` valid.
 - [ ] CWMP jalur langsung port `7547` (untuk CPE tanpa SNI/TLS modern) **plain HTTP, tanpa TLS sama sekali** — risiko yang diterima sadar untuk kompatibilitas CPE lawas, bukan oversight; pastikan payload yang lewat jalur ini tidak berisi data sensitif di luar protokol TR-069 itu sendiri.
 - [ ] MQTT TLS (8883) **saat ini dinonaktifkan** di `mosquitto/config/mosquitto.conf` (cert domain asli belum ada) — kalau diaktifkan lagi, `tls_version tlsv1.3` dan sumber sertifikat perlu direncanakan ulang (bukan lagi dari certbot, folder itu sudah tidak ada).
 
