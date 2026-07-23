@@ -72,12 +72,27 @@ else
   echo "warn: /etc/wireguard/wg0.conf tidak terbaca (butuh root?) - WireGuard TIDAK ter-backup" >&2
 fi
 
-# 3. Konfigurasi GenieACS (preset/provision/vparam disimpan di Mongo — sudah
+# 3. ADB keypair host ini (~/.android/adbkey{,.pub}) - identitas yang dipakai
+#    `adb connect <tunnel-ip>:5555` ke smartphone lewat wg0 (lihat
+#    docs/15-alur-akses-wireguard.md). TIDAK ada di git (private key).
+#    Tanpa file ini, host baru dapat key baru dan SETIAP HP yang sudah
+#    di-approve harus di-approve ulang manual (tap "Allow" di layar HP).
+#    ADB_KEY_DIR override-able untuk deployment di username lain.
+echo "-> ADB keypair"
+ADB_KEY_DIR="${ADB_KEY_DIR:-/home/warungbudina/.android}"
+if [ -r "${ADB_KEY_DIR}/adbkey" ]; then
+  tar czf "${DEST}/adbkey-${DATE}.tar.gz" -C "$(dirname "${ADB_KEY_DIR}")" "$(basename "${ADB_KEY_DIR}")/adbkey" "$(basename "${ADB_KEY_DIR}")/adbkey.pub"
+  chmod 600 "${DEST}/adbkey-${DATE}.tar.gz"
+else
+  echo "warn: ${ADB_KEY_DIR}/adbkey tidak terbaca - ADB keypair TIDAK ter-backup" >&2
+fi
+
+# 4. Konfigurasi GenieACS (preset/provision/vparam disimpan di Mongo — sudah
 #    tercakup di dump di atas — bagian ini backup file env/config statis)
 echo "-> GenieACS config"
 tar czf "${DEST}/genieacs-config-${DATE}.tar.gz" genieacs/genieacs.env genieacs/examples 2>/dev/null || true
 
-# 4. Docker named volume. Nama sudah di-prefix project. Volume yang belum ada
+# 5. Docker named volume. Nama sudah di-prefix project. Volume yang belum ada
 #    (mis. monitoring stack belum di-start) di-SKIP eksplisit - jangan biarkan
 #    `docker run -v` membuat volume kosong lalu men-tar-nya (backup kosong
 #    diam-diam). radius-db-data & mosquitto-log ikut, sebelumnya terlewat.
@@ -95,13 +110,13 @@ for SHORT in mongo-data redis-data mosquitto-data mosquitto-log radius-db-data \
     || echo "warn: gagal backup volume ${VOL}" >&2
 done
 
-# 5. Upload offsite (opsional)
+# 6. Upload offsite (opsional)
 if [ -n "${S3_BUCKET}" ]; then
   echo "-> Upload ke S3: ${S3_BUCKET}"
   aws s3 cp "${DEST}" "s3://${S3_BUCKET}/akses-vps/${DATE}/" --recursive
 fi
 
-# 6. Retensi lokal
+# 7. Retensi lokal
 echo "-> Bersihkan backup lokal > ${RETENTION_DAYS} hari"
 find "${BACKUP_ROOT}" -maxdepth 1 -type d -mtime "+${RETENTION_DAYS}" -exec rm -rf {} \;
 

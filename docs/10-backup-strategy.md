@@ -4,7 +4,8 @@
 1. **MongoDB** — `mongodump --archive --gzip` (logical dump, konsisten tanpa stop service).
 2. **Konfigurasi GenieACS** — file env statis (preset/provision/virtual parameter sendiri hidup di Mongo, otomatis tercakup di dump #1).
 3. **Konfigurasi WireGuard** — `/etc/wireguard` (server keys + `wg0.conf`, satu-satunya salinan state peer/registrasi VPN, tidak ada di git).
-4. **Docker named volume lain** — `mongo-data` (raw file, sebagai lapisan kedua selain logical dump), `redis-data`, `mosquitto-data`, `mosquitto-log`, `radius-db-data`; `grafana-data`/`prometheus-data`/`loki-data` ikut *hanya jika* monitoring stack sedang aktif (di-skip otomatis kalau tidak).
+4. **ADB keypair** (`~/.android/adbkey{,.pub}`) — identitas host ini ke semua smartphone yang sudah di-approve lewat `adb connect` via WireGuard (lihat `docs/15-alur-akses-wireguard.md`). Tanpa ini, host baru harus di-approve ulang manual di tiap HP. Tidak ada di git (private key).
+5. **Docker named volume lain** — `mongo-data` (raw file, sebagai lapisan kedua selain logical dump), `redis-data`, `mosquitto-data`, `mosquitto-log`, `radius-db-data`; `grafana-data`/`prometheus-data`/`loki-data` ikut *hanya jika* monitoring stack sedang aktif (di-skip otomatis kalau tidak).
 
 Tidak ada backup sertifikat TLS — sejak migrasi ke Cloudflare Tunnel, TLS
 publik ditangani Cloudflare edge, tidak ada lagi sertifikat lokal
@@ -19,8 +20,8 @@ Harian jam 02:00 (low-traffic window) lewat cron di host — lihat `backup/cront
 
 ## Restore
 `backup/restore.sh <folder-backup>` — restore MongoDB otomatis, WireGuard
-dipandu manual (butuh root, mencetak instruksi `tar xzf` + restart
-`wg-quick@wg0`), volume lain juga dipandu manual (sengaja tidak
+dan ADB keypair dipandu manual (mencetak instruksi `tar xzf` + langkah
+restart yang relevan), volume lain juga dipandu manual (sengaja tidak
 auto-overwrite semua volume by default untuk menghindari restore tidak
 sengaja menimpa data production yang lebih baru).
 
