@@ -1,2 +1,5 @@
-# Jalankan backup harian jam 02:00 server time, log ke file terpisah
+# Jalankan backup harian jam 02:00 server time, log ke file terpisah.
+# Sesuaikan path /opt/akses-vps di bawah ke lokasi repo yang sebenarnya di
+# server ini (mis. /home/warungbudina/akses-vps) - path /opt/akses-vps di
+# contoh ini cuma placeholder, BUKAN lokasi baku.
 0 2 * * * root BACKUP_ROOT=/opt/backups/akses-vps RETENTION_DAYS=14 /opt/akses-vps/backup/backup.sh >> /var/log/akses-vps-backup.log 2>&1
