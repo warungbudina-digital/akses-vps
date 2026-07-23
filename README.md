@@ -21,10 +21,11 @@ Docker di host VPS — lihat `docs/11-deployment-recommendations.md`).
 | `mosquitto/` | MQTT broker: auth, ACL, TLS |
 | `mongodb/` | Config + init script (user least-privilege, index) |
 | `genieacs/` | Env config + contoh preset/provision/virtual parameter |
+| `freeradius/` | RADIUS AAA server: `clients.conf` per-PoP, schema Postgres |
 | `grpc-server/` | Golang gRPC service (source lengkap, Dockerfile, Makefile) |
 | `monitoring/` | Prometheus, Loki, Promtail, Grafana provisioning |
 | `backup/` | Script backup harian + restore |
-| `certbot/` | Setup & renewal Let's Encrypt |
+| `wireguard/` | Script registrasi/deregistrasi client VPN, setup client |
 | `docker-compose.reference.yml` | Referensi dependency graph seluruh service |
 
 ## Quick Start (development lokal, topologi Docker Compose)

@@ -56,19 +56,31 @@ diteruskan ke peer mana).
 > route sendiri ke `10.66.66.0/24`. Belum ada exception peer-to-peer yang
 > terdaftar per tanggal dokumen ini.
 
-### Peer aktif (per 2026-07-11)
+### Peer aktif (per 2026-07-23)
 
 | Label | IP tunnel | Perangkat | Status |
 |---|---|---|---|
-| ltap-mini | `10.66.66.5` | MikroTik RB912R-2nD (RouterOS 7.7) — **client LAN pribadi**, bukan subscriber-facing: `ether1` + switch tambahan ke laptop, IP camera, media streaming saja, `wlan2` tetap disabled. Lihat catatan RouterOS di bawah. | **terhubung** — handshake aktif, ping dua arah OK |
-| client20 | `10.66.66.21` | Google Cloud Shell (sesi aktif saat ini) | **terhubung** — handshake aktif |
-| client16 | `10.66.66.17` | belum terdokumentasi | terdaftar, idle — handshake terakhir ~6 jam lalu, tidak sedang aktif |
-| client1 | `10.66.66.2` | Google Cloud Shell (`agent.obc-crypto.com` lab) | terdaftar, tidak ada handshake tercatat (sesi Cloud Shell kemungkinan tidak sedang jalan — VM Cloud Shell reset ~20 menit setelah sesi berakhir) |
-| client2 | `10.66.66.3` | Google Cloud Shell (akun test 2) | terdaftar, tidak ada handshake tercatat (idem client1) |
-| client3 | `10.66.66.4` | Google Cloud Shell (akun test 3) | terdaftar, tidak ada handshake tercatat (idem client1) |
-| client7 | `10.66.66.8` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
-| client12 | `10.66.66.13` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
-| client13 | `10.66.66.14` | belum terdokumentasi | terdaftar, tidak ada handshake tercatat |
+| ltap-mini | `10.66.66.5`, `192.168.70.0/24` | MikroTik RB912R-2nD (RouterOS 7.7) — **client LAN pribadi**, bukan subscriber-facing: `ether1` + switch tambahan ke laptop, IP camera, media streaming saja, `wlan2` tetap disabled. Lihat catatan RouterOS di bawah. | **terhubung** — handshake ~1 menit lalu, ping dua arah OK |
+| Redmi-Note-5 | `10.66.66.3` | Smartphone Android (Redmi Note 5) — didaftarkan 2026-07-16 (sebelumnya berlabel `redmi-note5-picoclaw`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake ~1 menit lalu |
+| Infinix-Hot-11 | `10.66.66.2` | Smartphone Android (Infinix Hot 11) — didaftarkan 2026-07-20 (sebelumnya berlabel `infinix-smartphone`), di-rename ke label bersih 2026-07-23 | **terhubung** — handshake ~2 menit lalu |
+| client50 | `10.66.66.51` | belum terdokumentasi | terdaftar 2026-07-16, idle — handshake terakhir ~5 hari 21 jam lalu |
+| client51 | `10.66.66.52` | belum terdokumentasi | terdaftar 2026-07-18, idle — handshake terakhir ~4 hari 16 jam lalu |
+| client60 | `10.66.66.61` | belum terdokumentasi | terdaftar 2026-07-19, idle — handshake terakhir ~3 hari 14 jam lalu |
+| client61 | `10.66.66.62` | belum terdokumentasi | terdaftar 2026-07-19, idle — handshake terakhir ~2 hari 16 jam lalu |
+| client71 | `10.66.66.72` | belum terdokumentasi | terdaftar 2026-07-21, idle — handshake terakhir ~1 hari 13 jam lalu |
+| client81 | `10.66.66.82` | belum terdokumentasi | terdaftar 2026-07-21, idle — handshake terakhir ~15 jam lalu |
+
+**Catatan drift 2026-07-11 → 2026-07-23:** peer lama di tabel sebelumnya
+(`client20`/`.21`, `client16`/`.17`, `client1`/`.2` lama, `client2`/`.3` lama,
+`client3`/`.4`, `client7`/`.8`, `client12`/`.13`, `client13`/`.14`) sudah tidak
+ada lagi di `/etc/wireguard/wg0.conf` saat ini — di-deregister di suatu titik
+antara kedua tanggal ini tanpa commit dokumentasi yang menyertainya (`wg0.conf`
+sendiri tidak pernah masuk git — lihat catatan keamanan di bawah). Slot IP
+`10.66.66.2` dan `10.66.66.3` sejak itu didaftarkan ulang untuk device baru
+(sekarang `Infinix-Hot-11` dan `Redmi-Note-5`) — kebetulan sama seperti slot
+`client1`/`client2` versi lama, tapi itu re-registrasi baru, bukan peer yang
+sama. Tabel di atas mencerminkan isi live `wg0.conf` per 2026-07-23, dicek
+langsung lewat `wg show wg0` + `wg0.conf`, bukan disalin dari versi sebelumnya.
 
 **`pop1` (`10.66.66.10`) sengaja tidak terdaftar saat ini** — slot lama (didaftarkan
 2026-07-08) key-nya hilang saat manual-edit dan sudah di-deregister
