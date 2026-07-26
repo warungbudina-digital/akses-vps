@@ -129,6 +129,32 @@ services:
       retries: 3
     depends_on: [mongodb, redis, mosquitto]
 
+  # Kanal kontrol fleet pentest (Raspberry Pi dkk) - terpisah sepenuhnya dari
+  # grpc-server di atas (domain GenieACS/TR-069, jangan dicampur). Tidak
+  # butuh mongodb/redis/genieacs, jadi cuma app-net+obs-net (bukan data-net).
+  pentest-grpc-server:
+    build: ./pentest-grpc-server
+    restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.2
+    networks: [app-net, obs-net]
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    user: "65532:65532"
+    env_file: [.env]
+    environment:
+      GRPC_PORT: "50052"
+      HTTP_PORT: "8444"
+      MQTT_BROKER_URL: "tcp://mosquitto:1883"
+      MQTT_USERNAME: "pentest-service"
+      MQTT_PASSWORD: "${PENTEST_MQTT_SERVICE_PASSWORD}"
+    healthcheck:
+      test: ["CMD", "/app/pentest-grpc-server", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    depends_on: [mosquitto]
+
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped

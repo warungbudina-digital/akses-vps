@@ -20,6 +20,8 @@ backup/output/
 # Generated
 grpc-server/proto/gen/
 grpc-server/bin/
+pentest-grpc-server/proto/gen/
+pentest-grpc-server/bin/
 
 # Go
 *.exe
