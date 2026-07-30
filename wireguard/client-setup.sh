@@ -25,14 +25,19 @@
 #      (103.217.144.104), matching PEER_LABEL/CLIENT_TUNNEL_IP you set below,
 #      then reload: `sudo wg syncconf wg0 <(sudo wg-quick strip wg0)`.
 #   7. It also sets up direct SSH access over the tunnel (see ENABLE_SSH_ACCESS
-#      below) - generates its own SSH keypair and appends the public key to
-#      /etc/ssh/keys/authorized_keys. NOTE: on Google Cloud Shell specifically,
-#      the real sshd is started with an -o AuthorizedKeysFile override pointing
-#      at THAT path, not the usual ~/.ssh/authorized_keys - confirmed live via
-#      `ps aux | grep sshd`. If you're running this on a non-Cloud-Shell host,
-#      check your own sshd's actual AuthorizedKeysFile first and adjust
-#      SSH_KEYS_FILE below to match (defaulting to the Cloud Shell path will
-#      silently do nothing useful elsewhere).
+#      below). The PRIMARY key it authorizes is ADMIN_SSH_PUBKEY - a key whose
+#      PRIVATE half already lives on the akses-vps admin box - appended to
+#      /etc/ssh/keys/authorized_keys. This is deliberate: it means the VPS can
+#      SSH in the moment the tunnel is up, with NO private key ever copied out
+#      of this Cloud Shell (that copy-out step was the old chicken-and-egg). A
+#      supplementary per-host key (~/.ssh/wg_access_key) is also generated but
+#      is optional. NOTE: on Google Cloud Shell specifically, the real sshd is
+#      started with an -o AuthorizedKeysFile override pointing at THAT path, not
+#      the usual ~/.ssh/authorized_keys - confirmed live via `ps aux | grep
+#      sshd`. If you're running this on a non-Cloud-Shell host, check your own
+#      sshd's actual AuthorizedKeysFile first and adjust SSH_KEYS_FILE below to
+#      match. The script now creates that dir (755, root:root) and file (644)
+#      itself every run, so it no longer silently no-ops when the dir is absent.
 #   8. This script has NO runtime dependency on cloudflared/agent.obc-crypto.com
 #      whatsoever - every step here is a local operation (apt, wg-quick, file
 #      edits). Cloudflare tunnel is only ever needed as a REMOTE TRIGGER
@@ -58,6 +63,14 @@ CLIENT_TUNNEL_IP="10.66.66.N/32"   # must be unique across all peers on the hub
 PEER_LABEL="clientN (describe this deployment)"
 ENABLE_SSH_ACCESS=true             # set false to skip the SSH section entirely
 SSH_KEYS_FILE="/etc/ssh/keys/authorized_keys"   # Cloud-Shell-specific, see note above
+# Public key whose PRIVATE half already lives on the akses-vps admin box.
+# Authorizing THIS key (instead of one generated here) is what breaks the
+# chicken-and-egg: the VPS connects in immediately with its own private key -
+# nothing secret ever has to be copied OUT of this Cloud Shell. A public key is
+# not a secret, so it is safe to keep hardcoded here. Leave empty to fall back
+# to the old copy-the-private-key-out behaviour (not recommended).
+#   private half on the VPS: ~/.ssh/akses-vps-cloudshell-admin
+ADMIN_SSH_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBiEl3eJfIZLlDp20T7o9pF+v74c7X3rLns2qd9QNPRV akses-vps-cloudshell-admin"
 # ------------------------------------------------
 
 WG_IF="wg0"
@@ -70,6 +83,24 @@ log() { echo "[client-setup] $*"; }
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "must run as root (Cloud Shell's .customize_environment already does; run manually with sudo otherwise)" >&2
+  exit 1
+fi
+
+# ---- fail fast on unedited placeholders / a malformed tunnel IP ----
+# Without this, an unedited CLIENT_TUNNEL_IP ("10.66.66.N/32") fails deep inside
+# wg-quick with a cryptic "Bad address" and set -e aborts mid-run. Catch it here
+# with a clear message BEFORE anything touches the system.
+if [ "$PEER_LABEL" = "clientN (describe this deployment)" ]; then
+  echo "[client-setup] ERROR: PEER_LABEL is still the placeholder - edit it near the top." >&2
+  exit 1
+fi
+if [[ ! "$CLIENT_TUNNEL_IP" =~ ^10\.66\.66\.([0-9]{1,3})/32$ ]]; then
+  echo "[client-setup] ERROR: CLIENT_TUNNEL_IP='$CLIENT_TUNNEL_IP' is not a real 10.66.66.X/32 address (still the 'N' placeholder?). Edit it near the top." >&2
+  exit 1
+fi
+_octet="${BASH_REMATCH[1]}"
+if [ "$_octet" -lt 2 ] || [ "$_octet" -gt 254 ]; then
+  echo "[client-setup] ERROR: tunnel IP host octet $_octet out of range - use 2-254 (.1 is the hub itself)." >&2
   exit 1
 fi
 
@@ -161,41 +192,70 @@ fi
 
 # ---- direct SSH access over the tunnel (optional, see ENABLE_SSH_ACCESS) ----
 if [ "$ENABLE_SSH_ACCESS" = true ]; then
+  # Ensure the sshd AuthorizedKeysFile dir exists with the permissions sshd
+  # actually needs, EVERY run. Two hard-won reasons this is unconditional now:
+  #   1. The old code only appended if the dir already existed, else it just
+  #      warned and skipped - so on a fresh VM (before Cloud Shell's onrun.sh
+  #      recreated the dir) SSH access was silently never set up.
+  #   2. A dir mode of 700 makes pubkey auth fail WITH NO LOG AT ALL (sshd
+  #      checks the key as a non-root user and can't traverse a 700 dir).
+  #      Force 755 dir / 644 file / root:root to avoid both traps.
+  SSH_KEYS_DIR="$(dirname "$SSH_KEYS_FILE")"
+  mkdir -p "$SSH_KEYS_DIR"
+  touch "$SSH_KEYS_FILE"
+  chmod 755 "$SSH_KEYS_DIR"
+  chmod 644 "$SSH_KEYS_FILE"
+  chown root:root "$SSH_KEYS_DIR" "$SSH_KEYS_FILE" 2>/dev/null || true
+
+  # Race-safe single-append: two concurrent invocations (manual run + Cloud
+  # Shell's own boot trigger firing .customize_environment) could each read
+  # before either writes and clobber the other's append - lost a working key to
+  # exactly this once, 2026-07-08. flock serialises it.
+  authorize_key() {
+    local pub="$1"
+    [ -n "$pub" ] || return 0
+    (
+      flock -w 10 200 || { log "WARNING: could not lock $SSH_KEYS_FILE, skipping append this run"; exit 0; }
+      if ! grep -qxF "$pub" "$SSH_KEYS_FILE" 2>/dev/null; then
+        echo "$pub" >> "$SSH_KEYS_FILE"
+        log "authorized key: ${pub##* }"
+      fi
+    ) 200>"${SSH_KEYS_FILE}.lock"
+  }
+
+  # PRIMARY - breaks the chicken-and-egg. Authorize a key whose PRIVATE half is
+  # already on the akses-vps admin box, so the VPS logs in immediately with NO
+  # key transfer out of here.
+  if [ -n "${ADMIN_SSH_PUBKEY:-}" ]; then
+    authorize_key "$ADMIN_SSH_PUBKEY"
+  else
+    log "WARNING: ADMIN_SSH_PUBKEY is empty - you will have to MANUALLY copy the"
+    log "private half of the key generated below out to the admin box (the exact"
+    log "chicken-and-egg this var exists to remove). Set it near the top."
+  fi
+
+  # SUPPLEMENTARY - a per-host key owned by THIS Cloud Shell. Optional and not
+  # needed for VPS access when ADMIN_SSH_PUBKEY is set; kept for a Cloud-Shell-
+  # owned identity if you ever want one.
   SSH_KEY_STORE="$REAL_HOME/.ssh"
   mkdir -p "$SSH_KEY_STORE"
   chmod 700 "$SSH_KEY_STORE"
-
   if [ ! -f "$SSH_KEY_STORE/wg_access_key" ]; then
     ssh-keygen -t ed25519 -f "$SSH_KEY_STORE/wg_access_key" -N "" -C "$PEER_LABEL" -q
-    log "generated NEW SSH keypair for direct access: $SSH_KEY_STORE/wg_access_key"
+    log "generated supplementary per-host SSH key: $SSH_KEY_STORE/wg_access_key"
   fi
+  authorize_key "$(cat "$SSH_KEY_STORE/wg_access_key.pub" 2>/dev/null)"
 
-  SSH_PUBKEY=$(cat "$SSH_KEY_STORE/wg_access_key.pub")
-
-  # flock'd read-check-append: without this, two concurrent invocations
-  # (e.g. this script run manually while Cloud Shell's own boot trigger for
-  # .customize_environment also fires) can each read the file before either
-  # writes, and the second write clobbers the first's append - lost an
-  # already-working key to exactly this race once, 2026-07-08.
-  if [ -f "$SSH_KEYS_FILE" ] || [ -d "$(dirname "$SSH_KEYS_FILE")" ]; then
-    (
-      flock -w 10 200 || { log "WARNING: could not lock $SSH_KEYS_FILE, skipping append this run"; exit 0; }
-      if ! grep -qxF "$SSH_PUBKEY" "$SSH_KEYS_FILE" 2>/dev/null; then
-        echo "$SSH_PUBKEY" >> "$SSH_KEYS_FILE"
-        chmod 644 "$SSH_KEYS_FILE"
-        log "added SSH key to $SSH_KEYS_FILE"
-      fi
-    ) 200>"${SSH_KEYS_FILE}.lock"
-  else
-    log "WARNING: $(dirname "$SSH_KEYS_FILE") doesn't exist - check your sshd's real AuthorizedKeysFile and adjust SSH_KEYS_FILE above"
-  fi
-
-  # basename "$REAL_HOME", not $(whoami) - this script runs as root (directly,
-  # or via a chroot/docker escape like the one used to test it), so whoami
-  # would print "root" here regardless of which account this actually is.
+  # basename "$REAL_HOME", not $(whoami) - this script runs as root, so whoami
+  # would print "root" regardless of which account this actually is.
   TARGET_USER=$(basename "$REAL_HOME")
-  log "to connect from elsewhere (e.g. jumping through the akses-vps hub):"
-  log "  ssh -o ProxyCommand=\"ssh -W %h:%p warungbudina@103.217.144.104\" -i <path-to-private-key-copied-from-$SSH_KEY_STORE/wg_access_key> ${TARGET_USER}@${CLIENT_TUNNEL_IP%/*}"
+  if [ -n "${ADMIN_SSH_PUBKEY:-}" ]; then
+    log "VPS can connect NOW (no key copy needed), directly over the tunnel:"
+    log "  ssh -i ~/.ssh/akses-vps-cloudshell-admin -o IdentitiesOnly=yes -p 22 ${TARGET_USER}@${CLIENT_TUNNEL_IP%/*}"
+  else
+    log "to connect, first copy the private key out to the admin box, then:"
+    log "  ssh -i <copied-from-$SSH_KEY_STORE/wg_access_key> -p 22 ${TARGET_USER}@${CLIENT_TUNNEL_IP%/*}"
+  fi
 fi
 
 # ---- overall result ----
