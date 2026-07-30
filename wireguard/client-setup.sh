@@ -78,6 +78,7 @@ WG_DIR="/etc/wireguard"
 SERVER_PUBKEY="Jquw62SGYrgeUJhDcBrbmQ8FkBDj37+ccqi15f9RzyE="
 SERVER_ENDPOINT="103.217.144.104:51820"
 ALLOWED_IPS="10.66.66.1/32"   # split-tunnel: only reach the hub, not the whole mesh
+SCRIPT_VERSION="2026-07-30.2" # bump on every change; printed at runtime so a stale Cloud Shell copy of this script is immediately obvious in the logs
 
 log() { echo "[client-setup] $*"; }
 
@@ -103,6 +104,8 @@ if [ "$_octet" -lt 2 ] || [ "$_octet" -gt 254 ]; then
   echo "[client-setup] ERROR: tunnel IP host octet $_octet out of range - use 2-254 (.1 is the hub itself)." >&2
   exit 1
 fi
+
+log "version $SCRIPT_VERSION | peer '$PEER_LABEL' | tunnel $CLIENT_TUNNEL_IP | ssh_access=$ENABLE_SSH_ACCESS"
 
 if ! command -v wg >/dev/null 2>&1; then
   log "installing wireguard-tools"
@@ -249,12 +252,41 @@ if [ "$ENABLE_SSH_ACCESS" = true ]; then
   # basename "$REAL_HOME", not $(whoami) - this script runs as root, so whoami
   # would print "root" regardless of which account this actually is.
   TARGET_USER=$(basename "$REAL_HOME")
+
+  # This script runs as root, so everything it just created under the real
+  # account's ~/.ssh is root-owned - which locks that account out of its OWN
+  # ~/.ssh (seen live: `ssh` on the Cloud Shell failed with "identity file ...
+  # Permission denied" and could not write known_hosts). Hand ownership back.
+  # (/etc/ssh/keys stays root:root on purpose - sshd requires that.)
+  chown -R "$TARGET_USER":"$TARGET_USER" "$SSH_KEY_STORE" 2>/dev/null || true
+
+  # Self-verify the admin key REALLY landed, matching on key material (field 2),
+  # not the whole line, so a differing trailing comment can't cause a false
+  # negative. This is the guard against "I followed the flow but SSH is still
+  # denied" - a mismatch is shouted HERE, at setup time, not discovered later at
+  # a failed ssh. (An old copy of this script, or an empty ADMIN_SSH_PUBKEY,
+  # both surface as ssh_ready=false with the reason printed.)
+  ssh_ready=false
   if [ -n "${ADMIN_SSH_PUBKEY:-}" ]; then
-    log "VPS can connect NOW (no key copy needed), directly over the tunnel:"
+    _admin_material=$(printf '%s\n' "$ADMIN_SSH_PUBKEY" | awk '{print $2}')
+    if [ -n "$_admin_material" ] && grep -qF "$_admin_material" "$SSH_KEYS_FILE" 2>/dev/null; then
+      ssh_ready=true
+    fi
+  fi
+
+  if [ "$ssh_ready" = true ]; then
+    log "SSH ACCESS READY (admin key confirmed in $SSH_KEYS_FILE)."
+    log "Connect FROM the akses-vps box (NOT from this Cloud Shell), directly over the tunnel:"
     log "  ssh -i ~/.ssh/akses-vps-cloudshell-admin -o IdentitiesOnly=yes -p 22 ${TARGET_USER}@${CLIENT_TUNNEL_IP%/*}"
   else
-    log "to connect, first copy the private key out to the admin box, then:"
-    log "  ssh -i <copied-from-$SSH_KEY_STORE/wg_access_key> -p 22 ${TARGET_USER}@${CLIENT_TUNNEL_IP%/*}"
+    log "!!! SSH ACCESS NOT READY - admin key is NOT in $SSH_KEYS_FILE. !!!"
+    if [ -z "${ADMIN_SSH_PUBKEY:-}" ]; then
+      log "  Reason: ADMIN_SSH_PUBKEY is empty. Set it near the top of THIS script"
+      log "  (this may be an OLD copy - current version is $SCRIPT_VERSION) and re-run."
+    else
+      log "  Reason: the append did not stick (locked file / wrong path?). Current"
+      log "  keys authorized right now:"; sed 's/^/    /' "$SSH_KEYS_FILE" 2>/dev/null
+    fi
   fi
 fi
 
@@ -263,8 +295,10 @@ fi
 # run is an expected, recoverable condition for an unattended boot script,
 # not a script failure - but it's reported distinctly so it's never silently
 # mistaken for a real success.
+_ssh_state="skipped (ENABLE_SSH_ACCESS=false)"
+[ "$ENABLE_SSH_ACCESS" = true ] && { [ "${ssh_ready:-false}" = true ] && _ssh_state="READY" || _ssh_state="NOT READY (see warning above)"; }
 if [ "$tunnel_ok" = true ]; then
-  log "DONE - tunnel + SSH access fully set up and verified working, no cloudflared involved at any point."
+  log "DONE (v$SCRIPT_VERSION) - tunnel: UP | SSH access: $_ssh_state. No cloudflared involved at any point."
 else
-  log "DONE - local setup complete, but tunnel not confirmed reachable yet (see message above). Nothing more to do on this side until the server-side key registration happens."
+  log "DONE (v$SCRIPT_VERSION) - tunnel: NOT confirmed yet (register the peer server-side, see above) | SSH access: $_ssh_state."
 fi
