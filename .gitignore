@@ -31,3 +31,6 @@ pentest-grpc-server/bin/
 # OS/editor
 .DS_Store
 *.swp
+
+# Bootstrap per-peer berisi WG private key - JANGAN commit
+wireguard/bootstraps/

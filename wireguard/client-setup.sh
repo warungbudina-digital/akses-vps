@@ -71,6 +71,17 @@ SSH_KEYS_FILE="/etc/ssh/keys/authorized_keys"   # Cloud-Shell-specific, see note
 # to the old copy-the-private-key-out behaviour (not recommended).
 #   private half on the VPS: ~/.ssh/akses-vps-cloudshell-admin
 ADMIN_SSH_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBiEl3eJfIZLlDp20T7o9pF+v74c7X3rLns2qd9QNPRV akses-vps-cloudshell-admin"
+# Restrictions prepended to the admin key line in authorized_keys. from= pins it
+# to the hub's tunnel IP so the key is USELESS from any other source even if the
+# line leaks (the VPS always connects from 10.66.66.1 over wg0); restrict drops
+# all forwarding/agent/X11; pty is added back so interactive admin shells still
+# work. Blank this out to authorize the key with no restrictions.
+ADMIN_KEY_OPTIONS='from="10.66.66.1",restrict,pty'
+# When true, the script copies ITSELF to $REAL_HOME/.customize_environment so
+# Cloud Shell auto-re-runs it (tunnel + key) on every VM provision. This is the
+# step that is easy to forget by hand - forgetting it is exactly why client60's
+# access was not persistent on 2026-07-31 until installed manually.
+INSTALL_PERSISTENCE=true
 # ------------------------------------------------
 
 WG_IF="wg0"
@@ -78,7 +89,7 @@ WG_DIR="/etc/wireguard"
 SERVER_PUBKEY="Jquw62SGYrgeUJhDcBrbmQ8FkBDj37+ccqi15f9RzyE="
 SERVER_ENDPOINT="103.217.144.104:51820"
 ALLOWED_IPS="10.66.66.1/32"   # split-tunnel: only reach the hub, not the whole mesh
-SCRIPT_VERSION="2026-07-30.2" # bump on every change; printed at runtime so a stale Cloud Shell copy of this script is immediately obvious in the logs
+SCRIPT_VERSION="2026-07-31.1" # bump on every change; printed at runtime so a stale Cloud Shell copy of this script is immediately obvious in the logs
 
 log() { echo "[client-setup] $*"; }
 
@@ -214,15 +225,33 @@ if [ "$ENABLE_SSH_ACCESS" = true ]; then
   # Shell's own boot trigger firing .customize_environment) could each read
   # before either writes and clobber the other's append - lost a working key to
   # exactly this once, 2026-07-08. flock serialises it.
+  # Authorize an authorized_keys LINE (may carry a leading options field like
+  # from="...",restrict). Deduplicates by KEY MATERIAL, not whole line: any prior
+  # line authorizing the same key is removed first, then the new line appended.
+  # Two hard reasons this must replace-by-material rather than append-if-absent:
+  #   1. If we ever tighten the options (e.g. add from=), an old UNrestricted
+  #      line for the same key would still authorize it and silently defeat the
+  #      new restriction. Removing it first makes the restriction actually bite.
+  #   2. Avoids accumulating duplicate lines for the same key across re-runs of
+  #      different script versions.
+  # Only the line(s) matching THIS key's material are touched - the canonical
+  # Cloud Shell key and any other authorized key are left exactly as they are.
   authorize_key() {
-    local pub="$1"
-    [ -n "$pub" ] || return 0
+    local line="$1"
+    [ -n "$line" ] || return 0
+    local material
+    material=$(printf '%s\n' "$line" | grep -oE 'AAAA[0-9A-Za-z+/]+=*' | head -n1)
+    [ -n "$material" ] || { log "WARNING: no key material found in a key line, skipping"; return 0; }
     (
-      flock -w 10 200 || { log "WARNING: could not lock $SSH_KEYS_FILE, skipping append this run"; exit 0; }
-      if ! grep -qxF "$pub" "$SSH_KEYS_FILE" 2>/dev/null; then
-        echo "$pub" >> "$SSH_KEYS_FILE"
-        log "authorized key: ${pub##* }"
+      flock -w 10 200 || { log "WARNING: could not lock $SSH_KEYS_FILE, skipping this run"; exit 0; }
+      if grep -qF "$material" "$SSH_KEYS_FILE" 2>/dev/null; then
+        # already present (some form) - drop it so the exact line below wins
+        grep -vF "$material" "$SSH_KEYS_FILE" > "${SSH_KEYS_FILE}.tmp" 2>/dev/null || : > "${SSH_KEYS_FILE}.tmp"
+        cat "${SSH_KEYS_FILE}.tmp" > "$SSH_KEYS_FILE"
+        rm -f "${SSH_KEYS_FILE}.tmp"
       fi
+      echo "$line" >> "$SSH_KEYS_FILE"
+      log "authorized key: $material (options: ${line%% *})"
     ) 200>"${SSH_KEYS_FILE}.lock"
   }
 
@@ -230,7 +259,7 @@ if [ "$ENABLE_SSH_ACCESS" = true ]; then
   # already on the akses-vps admin box, so the VPS logs in immediately with NO
   # key transfer out of here.
   if [ -n "${ADMIN_SSH_PUBKEY:-}" ]; then
-    authorize_key "$ADMIN_SSH_PUBKEY"
+    authorize_key "${ADMIN_KEY_OPTIONS:+$ADMIN_KEY_OPTIONS }$ADMIN_SSH_PUBKEY"
   else
     log "WARNING: ADMIN_SSH_PUBKEY is empty - you will have to MANUALLY copy the"
     log "private half of the key generated below out to the admin box (the exact"
@@ -287,6 +316,29 @@ if [ "$ENABLE_SSH_ACCESS" = true ]; then
       log "  Reason: the append did not stick (locked file / wrong path?). Current"
       log "  keys authorized right now:"; sed 's/^/    /' "$SSH_KEYS_FILE" 2>/dev/null
     fi
+  fi
+fi
+
+# ---- make persistence automatic (was the forgotten manual step on client60) ----
+# Cloud Shell only re-runs this setup on its own if the script lives at
+# $REAL_HOME/.customize_environment (persistent home, auto-run as root each
+# provision). Doing it here means "ran the script" == "access is persistent",
+# instead of trusting the operator to remember step 4 in the header. Guarded so
+# it is a no-op when the script is piped in over stdin (no $0 file to copy) or is
+# already running AS the customize_environment file.
+if [ "${INSTALL_PERSISTENCE:-true}" = true ] && [ -f "$0" ]; then
+  _ce="$REAL_HOME/.customize_environment"
+  _self="$(realpath -e "$0" 2>/dev/null || echo "$0")"
+  _cetgt="$(realpath -m "$_ce" 2>/dev/null || echo "$_ce")"
+  if [ "$_self" != "$_cetgt" ]; then
+    if cp -f "$0" "$_ce" && chmod +x "$_ce"; then
+      chown "$(basename "$REAL_HOME")":"$(basename "$REAL_HOME")" "$_ce" 2>/dev/null || true
+      log "persistence: installed self as $_ce (auto-runs as root every Cloud Shell provision)."
+    else
+      log "persistence: WARNING could not install $_ce - copy this script there manually to survive VM recycles."
+    fi
+  else
+    log "persistence: already running as $_ce - nothing to do."
   fi
 fi
 
