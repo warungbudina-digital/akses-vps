@@ -75,10 +75,11 @@ memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh an
 | **Musik + beat-sync** | `bpm` + `scene.beat_sync` | pustaka VN + Beat Otomatis | ✅ teruji (Discover, 267 beat) |
 | **Jump-cut** | `pacing.cut_points_sec` → cutlist | seek + `editor_toolbar_split` | ✅ teruji (18/19 cut) |
 | **Zoom in/out** | `camera_movement=zoom_in/zoom_out` (analyzer `734c838`) → `zoom_moments` | `editor_toolbar_clipZoom` Perbesar/Perkecil | ✅ teruji (in+out) |
+| **Pencahayaan** | `scene.lighting` (analyzer `d769792`) → blueprint `lighting` | VN **Adjust** (Kecerahan/Kontras/Suhu) | ✅ di IR (otomasi VN belum) |
 
-**Gap analyzer (belum bisa reproduksi penuh):**
+**Semua 6 dimensi struktural kini ada di IR.** Sisa opsional: otomasi VN Adjust (pencahayaan) — data siap di blueprint `lighting`.
 
-- **Pencahayaan**: **TAK ada analisa** brightness/eksposur/kontras/suhu-warna di analyzer (nol). Perlu modul baru `lighting.py` (per-scene mean-luminance/kontras/warm-cool). VN bisa reproduksi via Adjust, tapi tak ada sumber data.
+Catatan pencahayaan: `lighting.py` (deterministik, V1+V2) sample 3 frame/scene → brightness (mean-luminance), contrast (std-luminance), warmth (mean R−B), saturation + label (dark/normal/bright · low/normal/high · warm/neutral/cool). Diverifikasi klip warna terkontrol. IR LAMA tanpa `lighting` → re-analisa.
 
 Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = arah; divergence>0=aliran keluar=zoom in — diverifikasi numerik cv2). IR LAMA cuma `"zoom"` (arah tak diketahui) → re-analisa untuk dapat arah. Otomasi VN clipZoom (Perbesar=in / Perkecil=out) teruji; toolbar 21-tool dijangkau andal via Appium `UiScrollable(...).scrollIntoView(description("editor_toolbar_clipZoom"))`.
 
