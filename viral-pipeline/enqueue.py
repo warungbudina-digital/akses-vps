@@ -88,7 +88,9 @@ def main():
 
     sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by) VALUES "
            + ", ".join(vals) + " ON CONFLICT (source_url) DO NOTHING RETURNING id;")
-    r = subprocess.run(["ssh", DBVPS, "sudo -n -u postgres psql -d scraper -tA"],
+    # -q (quiet): tekan tag status perintah ("INSERT 0 N") agar TIDAK ikut ke stdout —
+    # tanpa ini token digit dari "INSERT 0 N" mencemari hitungan (id RETURNING saja yang boleh).
+    r = subprocess.run(["ssh", DBVPS, "sudo -n -u postgres psql -d scraper -tAq"],
                        input=sql, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit("enqueue gagal: " + r.stderr.strip()[:300])
