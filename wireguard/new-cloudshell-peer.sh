@@ -125,7 +125,37 @@ MATERIAL="\$(printf '%s\n' "\$LINE" | grep -oE 'AAAA[0-9A-Za-z+/]+=*' | head -n1
   echo "\$LINE" >> "\$SSH_KEYS_FILE"
 ) 200>"\$SSH_KEYS_FILE.lock"
 grep -qF "\$MATERIAL" "\$SSH_KEYS_FILE" && log "SSH ACCESS READY - dari VPS: ssh -i ~/.ssh/akses-vps-cloudshell-admin -o IdentitiesOnly=yes -p 22 \$(basename \$(getent passwd 1000 | cut -d: -f6))@\${CLIENT_TUNNEL_IP%/*}" || log "!!! SSH NOT READY"
-log "DONE (peer '${LABEL}', ephemeral, key TETAP)."
+
+# --- Watchdog kunci admin: jaga otorisasi tetap ada agar ControlMaster VPS bisa (re)connect ---
+# Cloud Shell bisa me-reset /etc/ssh/keys DI TENGAH sesi (bukan cuma saat provision).
+# Loop ini menambahkan ulang kunci admin begitu hilang, sehingga sambungan SSH/ControlMaster
+# dari VPS tetap persisten sepanjang sesi. Idempoten; berhenti sendiri saat VM recycle.
+WATCHDOG_INTERVAL=12
+start_key_watchdog(){
+  # matikan watchdog lama (kalau bootstrap dijalankan ulang) supaya tak dobel
+  pkill -f '${LABEL}-key-watchdog' 2>/dev/null || true
+  ( exec -a ${LABEL}-key-watchdog bash -c '
+      set +e
+      LINE='"\$(printf '%q' "\$LINE")"'
+      MATERIAL='"\$(printf '%q' "\$MATERIAL")"'
+      F='"\$(printf '%q' "\$SSH_KEYS_FILE")"'
+      D="\$(dirname "\$F")"
+      while true; do
+        if ! grep -qF "\$MATERIAL" "\$F" 2>/dev/null; then
+          mkdir -p "\$D"
+          printf "%s\n" "\$LINE" >> "\$F"
+          chmod 755 "\$D"; chmod 644 "\$F"
+          chown root:root "\$D" "\$F" 2>/dev/null || true
+        fi
+        sleep '"\$WATCHDOG_INTERVAL"'
+      done
+    ' ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  echo "\$!"
+}
+WATCH_PID="\$(start_key_watchdog)"
+log "watchdog kunci admin aktif (pid \$WATCH_PID) - re-otorisasi tiap \${WATCHDOG_INTERVAL}s"
+log "DONE (peer '${LABEL}', ephemeral, key TETAP + watchdog ControlMaster-persist)."
 BOOTSTRAP
 chmod 600 "$OUT"
 
