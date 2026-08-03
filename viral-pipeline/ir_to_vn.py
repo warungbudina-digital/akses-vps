@@ -108,6 +108,18 @@ def main():
                      "dir": s.get("camera_movement"),
                      "vn": {"zoom_in": "Perbesar", "zoom_out": "Perkecil"}.get(s.get("camera_movement"), "Perbesar/Perkecil?")}
                     for s in scenes if s.get("camera_movement") in ("zoom_in", "zoom_out", "zoom")]
+    # pencahayaan (analyzer >=d769792; IR lama tak punya field `lighting`)
+    lit = [s.get("lighting") for s in scenes if s.get("lighting")]
+    lighting_summary = {}
+    if lit:
+        avg = lambda k: round(sum(l.get(k, 0) for l in lit) / len(lit), 3)
+        lighting_summary = {
+            "avg_brightness": avg("brightness"), "avg_contrast": avg("contrast"),
+            "avg_warmth": avg("warmth"), "avg_saturation": avg("saturation"),
+            "brightness": top((l.get("brightness_label") for l in lit), 3),
+            "contrast": top((l.get("contrast_label") for l in lit), 3),
+            "temperature": top((l.get("temperature_label") for l in lit), 3),
+        }
 
     bp = {
         "source": {"bpm": d.get("bpm"), "total_sec": round(total, 2),
@@ -121,6 +133,7 @@ def main():
                    "cut_points_sec": cut_points},
         "camera": top((s.get("camera_movement") for s in scenes)),
         "zoom_moments": zoom_moments,
+        "lighting": lighting_summary,
         "beat":  {"bpm": d.get("bpm"), "on_beat_ratio": round(beat_on/len(scenes), 2) if scenes else 0},
         "captions": {"n_segments": len(segs), "words_avg": ss.get("word_count_avg"),
                      "speed": ss.get("speed"), "srt_file": base + ".srt",
@@ -168,7 +181,23 @@ def main():
         zline += " Momen: " + ", ".join(f"{z['t']}s→{z['vn']}" for z in zoom_moments[:12])
         if len(zoom_moments) > 12: zline += " …"
     r.append(zline + "\n")
-    r.append(f"6. **Hook** (3 detik pertama menentukan): buka dengan **{bp['hook']['opening_semantic']}** "
+    if lighting_summary:
+        ls = lighting_summary
+        bl = next(iter(ls["brightness"]), "normal"); cl = next(iter(ls["contrast"]), "normal"); tl = next(iter(ls["temperature"]), "neutral")
+        adj = []
+        if bl == "dark":   adj.append("naikkan **Kecerahan/Eksposur**")
+        elif bl == "bright": adj.append("turunkan **Kecerahan/Eksposur**")
+        if cl == "low":    adj.append("naikkan **Kontras**")
+        elif cl == "high": adj.append("turunkan **Kontras**")
+        if tl == "warm":   adj.append("geser **Suhu** ke hangat")
+        elif tl == "cool": adj.append("geser **Suhu** ke dingin")
+        adj_txt = ("; ".join(adj) or "biarkan (sudah netral/normal)")
+        r.append(f"6. **Pencahayaan** (dominan: {bl}/{cl}/{tl}; rata brightness {ls['avg_brightness']}, "
+                 f"contrast {ls['avg_contrast']}, warmth {ls['avg_warmth']}) → VN **Adjust** ("
+                 f"`editor_toolbar_filter`→Sesuaikan): {adj_txt}. Terapkan per-klip untuk scene yang menyimpang.\n")
+    else:
+        r.append("6. **Pencahayaan**: IR ini belum punya data pencahayaan (analyzer lama) — re-analisa untuk dapat panduan Adjust.\n")
+    r.append(f"7. **Hook** (3 detik pertama menentukan): buka dengan **{bp['hook']['opening_semantic']}** "
              f"({bp['hook']['opening_dur_sec']}s). {bp['hook']['strong_hook_count']} momen 'strong hook' di "
              f"detik: {bp['hook']['strong_hook_timestamps'][:10]} — jadikan titik tekanan/emphasis.\n")
     r.append("\n## Storyboard fase (234 scene → fase yang bisa diikuti)\n")
