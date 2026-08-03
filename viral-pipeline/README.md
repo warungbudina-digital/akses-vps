@@ -74,13 +74,13 @@ memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh an
 | **Caption** | `subtitle_segments` → SRT | impor SRT | ✅ teruji (221 caption) |
 | **Musik + beat-sync** | `bpm` + `scene.beat_sync` | pustaka VN + Beat Otomatis | ✅ teruji (Discover, 267 beat) |
 | **Jump-cut** | `pacing.cut_points_sec` → cutlist | seek + `editor_toolbar_split` | ✅ teruji (18/19 cut) |
-| **Zoom in/out** | `camera_movement=zoom_in/zoom_out` (analyzer `734c838`) → `zoom_moments` | `editor_toolbar_clipZoom` Perbesar/Perkecil | ✅ di IR (otomasi VN belum) |
+| **Zoom in/out** | `camera_movement=zoom_in/zoom_out` (analyzer `734c838`) → `zoom_moments` | `editor_toolbar_clipZoom` Perbesar/Perkecil | ✅ teruji (in+out) |
 
 **Gap analyzer (belum bisa reproduksi penuh):**
 
 - **Pencahayaan**: **TAK ada analisa** brightness/eksposur/kontras/suhu-warna di analyzer (nol). Perlu modul baru `lighting.py` (per-scene mean-luminance/kontras/warm-cool). VN bisa reproduksi via Adjust, tapi tak ada sumber data.
 
-Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = arah; divergence>0=aliran keluar=zoom in — diverifikasi numerik cv2). IR LAMA cuma `"zoom"` (arah tak diketahui) → re-analisa untuk dapat arah. Otomasi VN clipZoom per-arah belum dibuat (data siap di `zoom_moments`).
+Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = arah; divergence>0=aliran keluar=zoom in — diverifikasi numerik cv2). IR LAMA cuma `"zoom"` (arah tak diketahui) → re-analisa untuk dapat arah. Otomasi VN clipZoom (Perbesar=in / Perkecil=out) teruji; toolbar 21-tool dijangkau andal via Appium `UiScrollable(...).scrollIntoView(description("editor_toolbar_clipZoom"))`.
 
 Detail selector VN + jebakan otomasi Appium: lihat memori `project_viral_analyzer` /
 `project_infinix_streaming_setup` + repo `tool-appium/docs/vn-automation-map.md`.
