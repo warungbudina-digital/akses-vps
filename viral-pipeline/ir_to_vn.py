@@ -103,6 +103,11 @@ def main():
     ph = phases(scenes, a.min_phase_sec)
     # titik-cut = batas antar-scene (start scene ke-2 dst) = tempat split di VN
     cut_points = [round(s.get("start", 0), 2) for s in scenes if (s.get("start", 0) or 0) > 0.05]
+    # momen zoom (analyzer >=734c838 pisah zoom_in/zoom_out; IR lama = "zoom" tanpa arah)
+    zoom_moments = [{"t": round(s.get("start", 0), 2),
+                     "dir": s.get("camera_movement"),
+                     "vn": {"zoom_in": "Perbesar", "zoom_out": "Perkecil"}.get(s.get("camera_movement"), "Perbesar/Perkecil?")}
+                    for s in scenes if s.get("camera_movement") in ("zoom_in", "zoom_out", "zoom")]
 
     bp = {
         "source": {"bpm": d.get("bpm"), "total_sec": round(total, 2),
@@ -115,6 +120,7 @@ def main():
                    "style": "jump-cut cepat" if med < 3.5 else "cut sedang",
                    "cut_points_sec": cut_points},
         "camera": top((s.get("camera_movement") for s in scenes)),
+        "zoom_moments": zoom_moments,
         "beat":  {"bpm": d.get("bpm"), "on_beat_ratio": round(beat_on/len(scenes), 2) if scenes else 0},
         "captions": {"n_segments": len(segs), "words_avg": ss.get("word_count_avg"),
                      "speed": ss.get("speed"), "srt_file": base + ".srt",
@@ -151,8 +157,17 @@ def main():
              f"Caption menerus = alat retensi utama video ini.\n")
     r.append(f"4. **Musik + beat**: bpm **{bp['beat']['bpm']}**, {int(bp['beat']['on_beat_ratio']*100)}% cut on-beat "
              f"→ tambah musik lalu beat-sync (`UseMusicDetailActivity`→Ketukan, atau AutoCut).\n")
-    r.append(f"5. **Dinamika kamera** (punch-in/zoom): {json.dumps(bp['camera'], ensure_ascii=False)} "
-             f"→ terapkan `editor_toolbar_clipZoom`/keyframe skala pada klip dominan.\n")
+    nzi = sum(1 for z in zoom_moments if z['dir'] == 'zoom_in')
+    nzo = sum(1 for z in zoom_moments if z['dir'] == 'zoom_out')
+    nzq = sum(1 for z in zoom_moments if z['dir'] == 'zoom')  # IR lama, arah tak diketahui
+    zline = (f"5. **Dinamika kamera** {json.dumps(bp['camera'], ensure_ascii=False)}. "
+             f"**Zoom: {len(zoom_moments)} momen** ({nzi} in→`Perbesar`, {nzo} out→`Perkecil`"
+             + (f", {nzq} arah-tak-diketahui (IR lama)" if nzq else "") + "). "
+             f"Terapkan `editor_toolbar_clipZoom` per arah di timestamp momen (lihat `zoom_moments` di blueprint).")
+    if zoom_moments:
+        zline += " Momen: " + ", ".join(f"{z['t']}s→{z['vn']}" for z in zoom_moments[:12])
+        if len(zoom_moments) > 12: zline += " …"
+    r.append(zline + "\n")
     r.append(f"6. **Hook** (3 detik pertama menentukan): buka dengan **{bp['hook']['opening_semantic']}** "
              f"({bp['hook']['opening_dur_sec']}s). {bp['hook']['strong_hook_count']} momen 'strong hook' di "
              f"detik: {bp['hook']['strong_hook_timestamps'][:10]} — jadikan titik tekanan/emphasis.\n")
