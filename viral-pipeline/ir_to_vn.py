@@ -101,6 +101,8 @@ def main():
     med = sorted(durs)[len(durs)//2] if durs else 0
     ss = d.get("subtitle_style") or {}
     ph = phases(scenes, a.min_phase_sec)
+    # titik-cut = batas antar-scene (start scene ke-2 dst) = tempat split di VN
+    cut_points = [round(s.get("start", 0), 2) for s in scenes if (s.get("start", 0) or 0) > 0.05]
 
     bp = {
         "source": {"bpm": d.get("bpm"), "total_sec": round(total, 2),
@@ -110,7 +112,8 @@ def main():
         "pacing": {"n_scenes": len(scenes), "cuts": n_cut, "fades": n_fade,
                    "median_cut_sec": round(med, 2), "min_cut_sec": round(min(durs), 2) if durs else 0,
                    "max_cut_sec": round(max(durs), 2) if durs else 0,
-                   "style": "jump-cut cepat" if med < 3.5 else "cut sedang"},
+                   "style": "jump-cut cepat" if med < 3.5 else "cut sedang",
+                   "cut_points_sec": cut_points},
         "camera": top((s.get("camera_movement") for s in scenes)),
         "beat":  {"bpm": d.get("bpm"), "on_beat_ratio": round(beat_on/len(scenes), 2) if scenes else 0},
         "captions": {"n_segments": len(segs), "words_avg": ss.get("word_count_avg"),
@@ -124,9 +127,10 @@ def main():
         "phases": ph,
     }
 
-    # tulis SRT + blueprint json
+    # tulis SRT + blueprint json + cutlist (satu timestamp/baris, utk otomasi split VN)
     open(base + ".srt", "w").write(build_srt(segs))
     json.dump(bp, open(base + ".vn-blueprint.json", "w"), ensure_ascii=False, indent=2)
+    open(base + ".cutlist.txt", "w").write("\n".join(f"{t:.2f}" for t in cut_points) + "\n")
 
     # recipe markdown (langkah VN + storyboard)
     r = []
@@ -139,7 +143,9 @@ def main():
              + ("" if ratio_known else " ⚠️ IR tak simpan resolusi — konfirmasi dari sumber; default reel = 9:16.") + "\n")
     r.append(f"2. **Impor footage** lalu potong (`editor_toolbar_split`) mengikuti ritme "
              f"**{bp['pacing']['style']}** (median {bp['pacing']['median_cut_sec']}s/cut, "
-             f"{bp['pacing']['cuts']} cut + {bp['pacing']['fades']} fade). Jump-cut = buang jeda antar kalimat.\n")
+             f"{bp['pacing']['cuts']} cut + {bp['pacing']['fades']} fade). Jump-cut = buang jeda antar kalimat. "
+             f"**Titik-cut presisi ({len(cut_points)}) di `{os.path.basename(base)}.cutlist.txt`** (satu detik/baris) "
+             f"— split di tiap timestamp; tiap fase punya kepadatan cut sendiri (lihat storyboard).\n")
     r.append(f"3. **Caption**: impor `{os.path.basename(base)}.srt` via `flAddAddSubtitlesFormSRT` "
              f"({bp['captions']['n_segments']} segmen, ~{bp['captions']['words_avg']} kata, {bp['captions']['speed']}). "
              f"Caption menerus = alat retensi utama video ini.\n")
