@@ -27,6 +27,7 @@ Cloud Shell **tak bisa** menghubungi Postgres DB-VPS langsung (`pg_hba` tak meng
 | `schema-queue.sql` | DB-VPS | DDL antrean + kolom `category` pada hasil. **Sudah diterapkan** — berisi `DROP TABLE`, jangan dijalankan ulang pada antrean hidup. |
 | `validate-queue.sql` | DB-VPS | Uji perilaku antrean (dedup, dua claim paralel, cleanup). Aman: membersihkan seed-nya sendiri. |
 | `bring-up-analyzer.sh` | .50 | Siapkan analyzer di VM fresh (clone + build + up), idempoten. |
+| `ir_to_vn.py` | akses-vps | **Penerjemah IR → cetak-biru reproduksi VN** (Infinix): SRT importable + blueprint JSON + recipe.md (langkah VN + storyboard fase). Fidelity struktural. |
 
 Repo ini adalah **sumber kebenaran**; `~/viral-pipeline` di akses-vps adalah symlink ke sini.
 Salinan di node lain (DB-VPS, .50) adalah salinan-jalan — sinkronkan dari sini, jangan sebaliknya.
