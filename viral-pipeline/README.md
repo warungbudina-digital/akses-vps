@@ -71,7 +71,14 @@ publik kena login-wall → job **`done` tapi `posts=[]`** (gagal senyap). `brows
 URL manual** → `enqueue.py --stdin` (baris `<category> <url>`). Teruji 2026-08-03: scrape IG
 gogobud13 → `done`, 0 post → exit 4 (guard bekerja).
 
-**Belum ada:** pemicu/cron on-demand (menjalankan `orchestrator.py` otomatis saat .50 aktif).
+**Pemicu on-demand: ADA** (`run-drain.sh`, 2026-08-03) — `bash ~/viral-pipeline/run-drain.sh`:
+pastikan ControlMaster .50 → hitung job pending (0 = no-op) → jalankan orchestrator. Aman
+dari cron poller (no-op murah saat .50 mati/antrean kosong). **Belum ada:** cron poster-nya
+(opsional; `*/5 * * * * bash ~/viral-pipeline/run-drain.sh`).
+
+**Penerjemah IR → VN: ADA** (`ir_to_vn.py`, 2026-08-03) — `python3 ~/viral-pipeline/ir_to_vn.py <ir.json> --out <base>`:
+petakan IR ke cetak-biru reproduksi VN Infinix (fidelity struktural). Output `<base>.srt`
+(caption siap impor VN), `.vn-blueprint.json`, `.vn-recipe.md` (langkah VN + storyboard fase).
 
 ## Jebakan yang sudah dibayar mahal (jangan diulang)
 
