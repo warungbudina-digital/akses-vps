@@ -26,15 +26,18 @@ def dur_of(s):
 def top(counter, n=6):
     return dict(Counter(x for x in counter if x is not None).most_common(n))
 
-def ratio_from_video(v):
-    """IR simpan W/H? (sebagian versi cuma nama file). Kembalikan (label, tahu?)."""
-    if isinstance(v, dict):
-        w, h = v.get("width"), v.get("height")
-        if w and h:
-            r = w / h
-            lab = "9:16" if r < 0.85 else "1:1" if r < 1.15 else "16:9"
-            return f"{lab} ({w}x{h})", True
-    return "TAK DIKETAHUI (IR tak simpan resolusi)", False
+def ratio_from_ir(d):
+    """Rasio dari meta IR. Sejak analyzer commit de9f18a: aspect_ratio/width/height
+    ada di TOP-LEVEL IR. IR lama (cuma `video` string) -> TAK DIKETAHUI. (label, tahu?)."""
+    ar = d.get("aspect_ratio")
+    w, h = d.get("width"), d.get("height")
+    if ar:
+        return (f"{ar} ({w}x{h})" if w and h else ar), True
+    if w and h:
+        r = w / h
+        lab = "9:16" if r < 0.85 else "1:1" if r < 1.15 else "16:9"
+        return f"{lab} ({w}x{h})", True
+    return "TAK DIKETAHUI (IR lama tak simpan resolusi)", False
 
 def build_srt(segs):
     out = []
@@ -90,7 +93,7 @@ def main():
     segs   = d.get("subtitle_segments") or []
     durs   = [dur_of(s) for s in scenes]
     total  = sum(durs)
-    ratio_lab, ratio_known = ratio_from_video(d.get("video"))
+    ratio_lab, ratio_known = ratio_from_ir(d)
     n_fade = sum(1 for s in scenes if s.get("transition") == "fade")
     n_cut  = sum(1 for s in scenes if s.get("transition") == "cut")
     beat_on = sum(1 for s in scenes if s.get("beat_sync"))
