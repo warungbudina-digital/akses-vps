@@ -75,9 +75,9 @@ memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh an
 | **Musik + beat-sync** | `bpm` + `scene.beat_sync` | pustaka VN + Beat Otomatis | ✅ teruji (Discover, 267 beat) |
 | **Jump-cut** | `pacing.cut_points_sec` → cutlist | seek + `editor_toolbar_split` | ✅ teruji (18/19 cut) |
 | **Zoom in/out** | `camera_movement=zoom_in/zoom_out` (analyzer `734c838`) → `zoom_moments` | `editor_toolbar_clipZoom` Perbesar/Perkecil | ✅ teruji (in+out) |
-| **Pencahayaan** | `scene.lighting` (analyzer `d769792`) → blueprint `lighting` | VN **Adjust** (Kecerahan/Kontras/Suhu) | ✅ di IR (otomasi VN belum) |
+| **Pencahayaan** | `scene.lighting` (analyzer `d769792`) → blueprint `lighting` | VN **Adjust** (`editor_toolbar_filter`→Menyesuaikan) | ✅ teruji (KECERAHAN +61) |
 
-**Semua 6 dimensi struktural kini ada di IR.** Sisa opsional: otomasi VN Adjust (pencahayaan) — data siap di blueprint `lighting`.
+**Semua 6 dimensi struktural kini ada di IR DAN bisa diotomasi di VN** (rasio·caption·musik/beat·jump-cut·zoom·pencahayaan). Alur selector VN: `tool-appium/docs/vn-automation-map.md` §23.
 
 Catatan pencahayaan: `lighting.py` (deterministik, V1+V2) sample 3 frame/scene → brightness (mean-luminance), contrast (std-luminance), warmth (mean R−B), saturation + label (dark/normal/bright · low/normal/high · warm/neutral/cool). Diverifikasi klip warna terkontrol. IR LAMA tanpa `lighting` → re-analisa.
 
