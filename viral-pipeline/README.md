@@ -23,6 +23,7 @@ Cloud Shell **tak bisa** menghubungi Postgres DB-VPS langsung (`pg_hba` tak meng
 |---|---|---|
 | `orchestrator.py` | akses-vps | Kuras antrean: claim → download → stream → analisa → tulis hasil → bersihkan. |
 | `enqueue.py` | akses-vps | Masukkan URL berkategori ke antrean (auto-deteksi platform + `external_id`, dedup). |
+| `browser_enqueue.py` | akses-vps | Jembatan HULU: scrape URL video dari profil via browser API (.60) → pipe ke `enqueue.py`. Guard gagal-senyap (CAPTCHA/login-wall → exit 4). |
 | `schema-queue.sql` | DB-VPS | DDL antrean + kolom `category` pada hasil. **Sudah diterapkan** — berisi `DROP TABLE`, jangan dijalankan ulang pada antrean hidup. |
 | `validate-queue.sql` | DB-VPS | Uji perilaku antrean (dedup, dua claim paralel, cleanup). Aman: membersihkan seed-nya sendiri. |
 | `bring-up-analyzer.sh` | .50 | Siapkan analyzer di VM fresh (clone + build + up), idempoten. |
@@ -55,10 +56,21 @@ Teruji end-to-end 2026-08-02 dengan satu reel Instagram nyata: download di DB-VP
 stream ke .50 → `/analyze` → `media.video_analysis` terisi (bpm 117.45, 1 scene,
 semantic "reaction face") → `video_ingest` jadi `analyzed` → file bersih di kedua sisi.
 
-**Belum ada:** integrasi otomatis browser(.60) → `enqueue.py`. Sementara ini URL
-dimasukkan manual. Kendala yang sudah diketahui di sisi hulu: TikTok menyajikan slider
-CAPTCHA ke IP datacenter (video grid tak pernah render) dan IG publik kena login-wall,
-jadi penghasil URL tak bisa diasumsikan andal untuk semua platform.
+**Integrasi hulu browser(.60) → antrean: ADA** (`browser_enqueue.py`, 2026-08-03):
+```
+python3 ~/viral-pipeline/browser_enqueue.py <category> <platform> <profil-url> [--limit N] [--dry-run]
+# contoh: python3 ~/viral-pipeline/browser_enqueue.py viral_video instagram https://www.instagram.com/gogobud13/
+```
+Alur: `POST /scraper/jobs` di .60 → poll sampai `done`/`failed` → ambil `posts[].postUrl`
+→ pipe `<category> <url>` ke `enqueue.py` (satu sumber deteksi+dedup).
+
+**Kendala hulu tetap berlaku:** TikTok menyajikan slider CAPTCHA ke IP datacenter dan IG
+publik kena login-wall → job **`done` tapi `posts=[]`** (gagal senyap). `browser_enqueue.py`
+**tidak menelan ini**: exit **4** + pesan + saran fallback. **Jalur fallback andal = suplai
+URL manual** → `enqueue.py --stdin` (baris `<category> <url>`). Teruji 2026-08-03: scrape IG
+gogobud13 → `done`, 0 post → exit 4 (guard bekerja).
+
+**Belum ada:** pemicu/cron on-demand (menjalankan `orchestrator.py` otomatis saat .50 aktif).
 
 ## Jebakan yang sudah dibayar mahal (jangan diulang)
 
