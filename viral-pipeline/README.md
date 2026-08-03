@@ -64,7 +64,8 @@ memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh an
 | `<base>.srt` | Caption dari `subtitle_segments` (timecode) | Impor langsung ke VN (`flAddAddSubtitlesFormSRT`) |
 | `<base>.cutlist.txt` | Titik-cut (batas antar-scene), satu detik/baris | Otomasi split jump-cut di VN |
 | `<base>.vn-blueprint.json` | Rencana machine-readable (format/pacing/beat/captions/hook/phases/cut_points) | Konsumsi program |
-| `<base>.vn-recipe.md` | 6 langkah build VN + storyboard fase | Panduan manusia |
+| `<base>.vn-recipe.md` | 7 langkah build VN + storyboard fase | Panduan manusia |
+| `<base>.segments.json` | Rencana per-segmen: tiap scene → `zoom` (Perbesar/Perkecil) + `adjust` (dari lighting) | Orchestrasi VN berpandu-data |
 
 **Dimensi struktural yang SUDAH bisa direproduksi (teruji end-to-end di Infinix via Appium, 2026-08-03):**
 
@@ -78,6 +79,8 @@ memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh an
 | **Pencahayaan** | `scene.lighting` (analyzer `d769792`) → blueprint `lighting` | VN **Adjust** (`editor_toolbar_filter`→Menyesuaikan) | ✅ teruji (KECERAHAN +61) |
 
 **Semua 6 dimensi struktural kini ada di IR DAN bisa diotomasi di VN** (rasio·caption·musik/beat·jump-cut·zoom·pencahayaan). Alur selector VN: `tool-appium/docs/vn-automation-map.md` §23.
+
+**Orchestrasi berpandu-data (rangkai segmen):** `<base>.segments.json` (dari `ir_to_vn`) me-wire tiap segmen ke aksi VN (zoom+adjust). Syarat koheren: footage VN = footage yang dianalisa (segmen VN = scene IR). Status: rencana per-segmen SELESAI (commit `8671db2`); orchestrator VN (seek→select→zoom→adjust) tiap operasi tunggal PROVEN, tapi merangkai 3+ segmen dalam satu run masih rapuh (state VN Lynx) — jalankan per-segmen + reset (vn-map §23f).
 
 Catatan pencahayaan: `lighting.py` (deterministik, V1+V2) sample 3 frame/scene → brightness (mean-luminance), contrast (std-luminance), warmth (mean R−B), saturation + label (dark/normal/bright · low/normal/high · warm/neutral/cool). Diverifikasi klip warna terkontrol. IR LAMA tanpa `lighting` → re-analisa.
 
