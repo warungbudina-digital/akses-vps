@@ -121,6 +121,36 @@ def main():
             "temperature": top((l.get("temperature_label") for l in lit), 3),
         }
 
+    # RENCANA PER-SEGMEN — wiring tiap scene ke aksi VN (zoom clipZoom + Adjust pencahayaan).
+    # Dikonsumsi orchestrator vn_reproduce.py (segmen VN = scene IR, syarat: footage sama).
+    def _adjust_from_lighting(lg):
+        acts = []
+        if not lg:
+            return acts
+        bl, cl, tl = lg.get("brightness_label"), lg.get("contrast_label"), lg.get("temperature_label")
+        if bl == "dark":    acts.append({"param": "KECERAHAN", "dir": "naik"})
+        elif bl == "bright": acts.append({"param": "KECERAHAN", "dir": "turun"})
+        if cl == "low":     acts.append({"param": "KONTRAS", "dir": "naik"})
+        elif cl == "high":  acts.append({"param": "KONTRAS", "dir": "turun"})
+        if tl == "warm":    acts.append({"param": "SUHU", "dir": "hangat"})
+        elif tl == "cool":  acts.append({"param": "SUHU", "dir": "dingin"})
+        return acts
+    segments = []
+    for idx, s in enumerate(scenes):
+        cm = s.get("camera_movement")
+        zoom = None
+        if cm in ("zoom_in", "zoom_out"):
+            zoom = {"dir": cm, "vn": {"zoom_in": "Perbesar", "zoom_out": "Perkecil"}[cm]}
+        elif cm == "zoom":
+            zoom = {"dir": "zoom", "vn": "Perbesar/Perkecil?"}  # IR lama, arah tak diketahui
+        segments.append({
+            "i": idx, "start": round(s.get("start", 0), 2), "end": round(s.get("end", 0), 2),
+            "dur": round(s.get("duration", 0), 2),
+            "zoom": zoom, "adjust": _adjust_from_lighting(s.get("lighting")),
+        })
+    n_seg_zoom = sum(1 for x in segments if x["zoom"])
+    n_seg_adj = sum(1 for x in segments if x["adjust"])
+
     bp = {
         "source": {"bpm": d.get("bpm"), "total_sec": round(total, 2),
                    "aspect_ratio": ratio_lab, "aspect_ratio_known": ratio_known},
@@ -144,12 +174,16 @@ def main():
         "clip_semantics": top((s.get("semantic") for s in scenes), 8),
         "emotion_signal_noisy": top((s.get("emotion") for s in scenes)),
         "phases": ph,
+        "segments": segments,
     }
 
     # tulis SRT + blueprint json + cutlist (satu timestamp/baris, utk otomasi split VN)
     open(base + ".srt", "w").write(build_srt(segs))
     json.dump(bp, open(base + ".vn-blueprint.json", "w"), ensure_ascii=False, indent=2)
     open(base + ".cutlist.txt", "w").write("\n".join(f"{t:.2f}" for t in cut_points) + "\n")
+    # rencana per-segmen utk orchestrator vn_reproduce.py
+    json.dump({"segments": segments, "aspect_ratio": ratio_lab}, open(base + ".segments.json", "w"),
+              ensure_ascii=False, indent=1)
 
     # recipe markdown (langkah VN + storyboard)
     r = []
