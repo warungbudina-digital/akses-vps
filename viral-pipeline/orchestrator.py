@@ -23,6 +23,7 @@ C50_INPUT   = "~/tool-analisa-video/data/input"
 ANALYZER    = "http://127.0.0.1:9021"
 COOKIES     = {"youtube":"yt-cookies.txt", "facebook":"fb-cookies.txt", "instagram":"ig-cookies.txt"}
 MAX_JOBS    = int(os.getenv("MAX_JOBS", "0"))
+ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "1200"))  # detik; whisper CPU (V2) utk video panjang bisa >5mnt
 
 def sh(args, inp=None, timeout=None):
     return subprocess.run(args, input=inp, capture_output=True, text=True, timeout=timeout)
@@ -107,9 +108,11 @@ def stream_to_c50(job, dbvps_relpath):
 
 def analyze(container_path):
     payload = json.dumps({"video_path": container_path})
-    r = ssh_c50(f"curl -s -X POST {ANALYZER}/analyze -H 'Content-Type: application/json' -d {shlex.quote(payload)}", timeout=300)
+    cmd = (f"curl -s --max-time {ANALYZE_TIMEOUT} -X POST {ANALYZER}/analyze "
+           f"-H 'Content-Type: application/json' -d {shlex.quote(payload)}")
+    r = ssh_c50(cmd, timeout=ANALYZE_TIMEOUT + 60)
     if r.returncode != 0:
-        return None, f"curl analyze gagal: {r.stderr.strip()[:200]}"
+        return None, f"curl analyze gagal (rc={r.returncode}): {(r.stderr or r.stdout).strip()[:200]}"
     try:
         data = json.loads(r.stdout)
     except Exception:
@@ -147,23 +150,27 @@ def main():
             log("antrean habis." if done else "antrean kosong."); break
         done += 1
         log(f"[job {job['id']}] {job['platform']}/{job['category']} {job['url'][:60]}")
-        relpath, err = download(job)
-        if err:
-            log("  x download:", err); fail_job(job["id"], err); fail += 1; continue
-        log("  downloaded:", relpath)
-        cpath, err = stream_to_c50(job, relpath)
-        if err:
-            log("  x stream:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
-        data, err = analyze(cpath)
-        if err:
-            log("  x analyze:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
-        werr = write_result(job, data)
-        if werr:
-            log("  x write:", werr); fail_job(job["id"], werr); cleanup(job["id"]); fail += 1; continue
-        cleanup(job["id"])
-        ok += 1
-        sc = len(data["analysis"].get("scene_analysis", []))
-        log(f"  OK: status={data['status']} scenes={sc} bpm={data['analysis'].get('bpm')}")
+        try:
+            relpath, err = download(job)
+            if err:
+                log("  x download:", err); fail_job(job["id"], err); fail += 1; continue
+            log("  downloaded:", relpath)
+            cpath, err = stream_to_c50(job, relpath)
+            if err:
+                log("  x stream:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
+            data, err = analyze(cpath)
+            if err:
+                log("  x analyze:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
+            werr = write_result(job, data)
+            if werr:
+                log("  x write:", werr); fail_job(job["id"], werr); cleanup(job["id"]); fail += 1; continue
+            cleanup(job["id"])
+            ok += 1
+            sc = len(data["analysis"].get("scene_analysis", []))
+            log(f"  OK: status={data['status']} scenes={sc} bpm={data['analysis'].get('bpm')}")
+        except Exception as e:
+            # TimeoutExpired dll TAK boleh crash seluruh drain + menyangkutkan job di 'processing'
+            log("  x exception:", repr(e)[:200]); fail_job(job["id"], f"exception: {e}"[:800]); cleanup(job["id"]); fail += 1; continue
     log(f"SELESAI: {ok} sukses, {fail} gagal, {done} diproses.")
 
 if __name__ == "__main__":
