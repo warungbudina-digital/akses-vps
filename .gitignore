@@ -34,3 +34,7 @@ pentest-grpc-server/bin/
 
 # Bootstrap per-peer berisi WG private key - JANGAN commit
 wireguard/bootstraps/
+
+# Python
+__pycache__/
+*.pyc
