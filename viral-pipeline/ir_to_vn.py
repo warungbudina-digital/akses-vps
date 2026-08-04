@@ -5,10 +5,14 @@ Ambil hasil analisa (ViralAnalysis IR) lalu petakan ke "pemahaman yang bisa
 dibangun ulang" oleh VN editor di Infinix. Target = FIDELITY STRUKTURAL
 (rasio/durasi/ritme-cut/beat/caption/hook), BUKAN pixel-identik.
 
-Output (3 berkas + ringkasan ke stdout):
-  <out>.srt              — caption siap IMPOR ke VN (flAddAddSubtitlesFormSRT)
-  <out>.vn-blueprint.json — rencana terstruktur (machine-readable)
-  <out>.vn-recipe.md     — langkah build VN + storyboard fase (human-readable)
+Output (4 berkas + ringkasan ke stdout):
+  <out>.srt               — caption siap IMPOR ke VN (flAddAddSubtitlesFormSRT)
+  <out>.vn-blueprint.json  — rencana terstruktur (machine-readable)
+  <out>.vn-recipe.md      — langkah build VN + storyboard fase (human-readable)
+  <out>.story-script.md   — alur cerita babak-per-babak (bahasa naratif) + arahan
+                             "apa yang harus direkam" per babak, buat kreator/model
+                             AI kreatif menulis naskah rekam-ulang yang match pesan
+                             video sumber. DIHASILKAN OTOMATIS TIAP ANALISA VIDEO.
 
 Pakai:  ir_to_vn.py <ir.json> [--out DIR/basename] [--min-phase-sec 6]
 """
@@ -81,6 +85,151 @@ def phases(scenes, min_phase_sec):
             "beat_sync_ratio": round(sum(1 for s in sc if s.get("beat_sync")) / len(sc), 2),
         })
     return res
+
+CAMERA_DESC = {
+    "static":    "kamera diam (tripod/statis), framing stabil",
+    "pan":       "kamera bergerak menyamping (pan) mengikuti aksi",
+    "shake":     "kamera goyang/handheld — kesan mentah dan energik",
+    "fast_move": "kamera bergerak cepat — energi tinggi, mengejar aksi",
+    "zoom_in":   "kamera zoom IN (mendekat) — menekankan detail/emosi",
+    "zoom_out":  "kamera zoom OUT (menjauh) — membuka konteks",
+    "zoom":      "kamera zoom (arah tak spesifik di IR lama)",
+}
+
+def _camera_desc(cams):
+    if not cams:
+        return "tidak ada gerakan kamera dominan terdeteksi"
+    return "; ".join(f"{CAMERA_DESC.get(c, c)} ({n}x)" for c, n in cams.items())
+
+def _lighting_desc(bl, cl, tl):
+    parts = []
+    if bl == "dark": parts.append("pencahayaan REDUP/gelap")
+    elif bl == "bright": parts.append("pencahayaan TERANG/high-key")
+    elif bl: parts.append("pencahayaan normal")
+    if cl == "low": parts.append("kontras rendah (flat/lembut)")
+    elif cl == "high": parts.append("kontras tinggi (tegas/dramatis)")
+    if tl == "warm": parts.append("nuansa warna HANGAT (oranye/kuning)")
+    elif tl == "cool": parts.append("nuansa warna DINGIN (biru)")
+    return ", ".join(parts) if parts else "tidak ada data pencahayaan"
+
+def _subs_in_range(segs, t0, t1):
+    return [s.get("text", "").strip() for s in segs
+            if s.get("text", "").strip() and (s.get("start", 0) or 0) < t1 and (s.get("end", 0) or 0) > t0]
+
+def _framing_desc(scenes_in_phase):
+    has_face = any((s.get("framing") or {}).get("faces") for s in scenes_in_phase)
+    positions = top(((s.get("framing") or {}).get("speaker_position") for s in scenes_in_phase), 2)
+    if has_face:
+        pos = "/".join(positions.keys()) if positions and next(iter(positions)) != "unknown" else "tidak spesifik"
+        return f"ADA wajah/orang di frame (posisi: {pos}) → rekam gaya talking-head/wajah menghadap kamera"
+    return "TIDAK ada wajah terdeteksi → shot objek/teks/B-roll, bukan talking-head"
+
+def _shot_direction(is_hook, is_penutup, p, scenes_in_phase, bl):
+    has_face = any((s.get("framing") or {}).get("faces") for s in scenes_in_phase)
+    parts = []
+    if is_hook:
+        parts.append("buat 1-3 detik pertama SANGAT jelas & langsung nyantol (mengejutkan/relate) — ini penentu penonton lanjut nonton atau scroll")
+    if is_penutup:
+        parts.append("pastikan pesan/ajakan mendarat jelas di sini — ini yang paling diingat penonton setelah video selesai")
+    if has_face:
+        parts.append("posisikan wajah/tubuh presenter menghadap kamera, ekspresi harus cocok mood babak ini")
+    else:
+        parts.append("ambil footage objek/teks/aksi (B-roll) sesuai tema babak, tanpa perlu wajah di kamera")
+    if p["n_cuts"] > 1 and p["avg_cut_sec"] < 2.5:
+        parts.append(f"siapkan minimal {p['n_cuts']} klip pendek terpisah (~{p['avg_cut_sec']}s/klip) untuk di-jump-cut, jangan 1 take panjang")
+    else:
+        parts.append(f"1 take ~{p['dur_sec']}s cukup, tidak perlu banyak potongan")
+    if bl == "dark":
+        parts.append("syuting di lokasi/waktu minim cahaya, atau turunkan exposure saat editing")
+    elif bl == "bright":
+        parts.append("syuting di tempat terang/siang hari")
+    return "; ".join(parts) + "."
+
+def _core_message(bp, ph, segs):
+    all_text = " ".join(s.get("text", "") for s in segs if s.get("text", "").strip())
+    cta_words = ["komen", "follow", "like", "share", "subscribe", "dm", "save",
+                 "bagikan", "klik", "link di bio", "tonton sampai habis"]
+    has_cta = any(w in all_text.lower() for w in cta_words)
+    lines = []
+    if all_text.strip():
+        lines.append(f'Narasi suara yang tertangkap: "{all_text.strip()}"')
+    else:
+        lines.append("Tidak ada narasi suara yang tertangkap — pesan kemungkinan besar disampaikan lewat "
+                      "TEKS DI LAYAR (on-screen text), bukan suara. Pastikan naskah rekam-ulang menuliskan "
+                      "teks overlay yang jelas per babak, jangan andalkan dialog.")
+    if has_cta:
+        lines.append("Terdeteksi pola AJAKAN AKSI (CTA) dalam narasi — pastikan versi rekam ulang punya CTA "
+                      "setara (komen kata kunci / follow / tonton sampai akhir) supaya efek engagement ikut "
+                      "ter-reproduksi, bukan cuma visualnya.")
+    hook_lab = bp["hook"]["opening_semantic"] or "tidak diketahui"
+    lines.append(f"Struktur keseluruhan: buka dengan **{hook_lab}** dalam {bp['hook']['opening_dur_sec']}s "
+                 f"pertama, lalu {len(ph)} babak mengalir dengan ritme **{bp['pacing']['style']}**, "
+                 f"ditutup di babak bertema **{ph[-1]['semantic'] if ph else hook_lab}**. Reproduksi yang "
+                 f"benar bukan cuma meniru visualnya, tapi menjaga URUTAN dan RITME transisi antar-babak ini.")
+    return "\n\n".join(lines)
+
+def build_story_script(scenes, segs, ph, bp, base):
+    """Alur cerita babak-per-babak (naratif, bukan tabel teknis) supaya kreator/model
+    AI kreatif bisa membayangkan visualnya dan menulis naskah rekam-ulang yang match
+    dengan pesan video sumber. Dipanggil OTOMATIS tiap analisa (bukan on-request)."""
+    r = []
+    r.append(f"# Alur Cerita & Panduan Rekam — {os.path.basename(base)}\n")
+    r.append(f"> Dibaca oleh **kreator/model AI kreatif** untuk membayangkan visual & menulis naskah rekam "
+             f"ulang. Durasi total {bp['format']['duration_mmss']} ({bp['format']['duration_sec']}s), "
+             f"rasio {bp['source']['aspect_ratio']}.\n")
+    opening_sem = bp["hook"]["opening_semantic"] or "tidak diketahui"
+    on_beat_txt = (f"selaras irama musik ({int(bp['beat']['on_beat_ratio']*100)}% on-beat)"
+                   if bp["beat"]["on_beat_ratio"] else "tanpa data selaras-beat")
+    r.append(f"**Premis 1-kalimat:** video ini membuka dengan *{opening_sem}* lalu bergerak lewat "
+             f"{len(ph)} babak visual sebelum berakhir di *{ph[-1]['semantic'] if ph else opening_sem}*, "
+             f"disokong {bp['pacing']['cuts']} potongan ({bp['pacing']['style']}), {on_beat_txt}.\n")
+
+    r.append("## Alur cerita, langkah demi langkah\n")
+    n = len(ph)
+    for i, p in enumerate(ph):
+        scenes_in_phase = [s for s in scenes if p["start"] <= (s.get("start", 0) or 0) <= p["end"]] or scenes
+        is_hook = (n == 1) or (i == 0)
+        is_penutup = (n == 1) or (i == n - 1)
+        if n == 1:
+            label = "HOOK + ISI + PENUTUP (video super pendek, satu napas)"
+        elif i == 0:
+            label = "HOOK (pembuka — menentukan apakah penonton lanjut nonton)"
+        elif i == n - 1:
+            label = "PENUTUP / PAYOFF-CTA (pesan mendarat / ajakan aksi)"
+        else:
+            label = f"ISI / BUILD-UP {i}"
+
+        strong_here = [t for t in bp["hook"]["strong_hook_timestamps"] if p["start"] <= t <= p["end"]]
+        lg = [s.get("lighting") for s in scenes_in_phase if s.get("lighting")]
+        bl = next(iter(top((l.get("brightness_label") for l in lg), 1)), None)
+        cl = next(iter(top((l.get("contrast_label") for l in lg), 1)), None)
+        tl = next(iter(top((l.get("temperature_label") for l in lg), 1)), None)
+        subs = _subs_in_range(segs, p["start"], p["end"])
+        sub_txt = " / ".join(f'"{t}"' for t in subs) if subs else \
+            "_(tidak ada narasi suara terdeteksi di sini — kemungkinan pesan lewat teks-di-layar)_"
+
+        r.append(f"### Babak {i+1} — {label}\n")
+        r.append(f"**Waktu:** {p['start']}s – {p['end']}s ({p['dur_sec']}s, {p['n_cuts']} potongan)\n")
+        r.append(f"**Apa yang terlihat di layar:** adegan bertipe **{p['semantic']}**, nuansa emosi "
+                 f"**{p['emotion']}** (sinyal AI, arah bukan pasti), {_camera_desc(p['camera'])}.\n")
+        r.append(f"**Kondisi cahaya:** {_lighting_desc(bl, cl, tl)}.\n")
+        r.append(f"**Framing:** {_framing_desc(scenes_in_phase)}.\n")
+        r.append(f"**Teks/dialog di segmen ini:** {sub_txt}\n")
+        if strong_here:
+            r.append(f"**⚡ Titik hook kuat** di detik {strong_here} — momen yang PALING menahan perhatian, "
+                     f"jangan lewatkan saat rekam ulang (ekspresi/aksi harus tegas di sini).\n")
+        r.append(f"**Yang harus kamu REKAM di babak ini:** "
+                 f"{_shot_direction(is_hook, is_penutup, p, scenes_in_phase, bl)}\n")
+
+    r.append("## Pesan inti yang harus tersampaikan ke penonton\n")
+    r.append(_core_message(bp, ph, segs) + "\n")
+
+    r.append("## Checklist rekam cepat\n")
+    for i, p in enumerate(ph):
+        cam_short = _camera_desc(p["camera"]).split(";")[0]
+        r.append(f"- [ ] Babak {i+1} ({p['dur_sec']}s): {p['semantic']} — {cam_short}")
+    r.append("")
+    return "\n".join(r)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -234,13 +383,17 @@ def main():
     r.append(f"7. **Hook** (3 detik pertama menentukan): buka dengan **{bp['hook']['opening_semantic']}** "
              f"({bp['hook']['opening_dur_sec']}s). {bp['hook']['strong_hook_count']} momen 'strong hook' di "
              f"detik: {bp['hook']['strong_hook_timestamps'][:10]} — jadikan titik tekanan/emphasis.\n")
-    r.append("\n## Storyboard fase (234 scene → fase yang bisa diikuti)\n")
+    r.append(f"\n## Storyboard fase ({len(scenes)} scene → fase yang bisa diikuti)\n")
     r.append("| # | mulai | durasi | cut | rata cut | jenis konten | emosi(CLIP,noisy) | kamera |\n|---|---|---|---|---|---|---|---|")
     for i, p in enumerate(ph, 1):
         r.append(f"| {i} | {p['start']}s | {p['dur_sec']}s | {p['n_cuts']} | {p['avg_cut_sec']}s | "
                  f"{p['semantic']} | {p['emotion']} | {'/'.join(p['camera'].keys())} |")
     r.append(f"\n_{len(ph)} fase. Sinyal semantic/emotion dari CLIP zero-shot = ARAH, bukan kebenaran mutlak._\n")
     open(base + ".vn-recipe.md", "w").write("\n".join(r))
+
+    # alur cerita naratif (OTOMATIS tiap analisa — lihat build_story_script)
+    story = build_story_script(scenes, segs, ph, bp, base)
+    open(base + ".story-script.md", "w").write(story)
 
     # ringkasan stdout
     print(f"IR: {os.path.basename(a.ir)}  |  durasi {bp['format']['duration_mmss']}  |  rasio {ratio_lab}")
@@ -250,7 +403,7 @@ def main():
     print(f"caption: {bp['captions']['n_segments']} segmen -> {base}.srt")
     print(f"hook: buka '{bp['hook']['opening_semantic']}', {bp['hook']['strong_hook_count']} strong-hook")
     print(f"fase storyboard: {len(ph)}")
-    print(f"tulis: {base}.srt , {base}.vn-blueprint.json , {base}.vn-recipe.md")
+    print(f"tulis: {base}.srt , {base}.vn-blueprint.json , {base}.vn-recipe.md , {base}.story-script.md")
 
 if __name__ == "__main__":
     main()
