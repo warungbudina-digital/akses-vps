@@ -22,6 +22,8 @@ grpc-server/proto/gen/
 grpc-server/bin/
 pentest-grpc-server/proto/gen/
 pentest-grpc-server/bin/
+nginx/dashboards/*/index.html
+viral-pipeline/dashboard.html
 
 # Go
 *.exe
