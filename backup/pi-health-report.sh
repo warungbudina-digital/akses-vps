@@ -14,8 +14,10 @@
 # Pi = disk PERSISTEN + service systemd enabled (wg-quick/docker/spiderfoot/ollama)
 # -> bring-up ZERO-TOUCH saat power-on (beda dari Cloud Shell). Tak perlu skrip deploy.
 #
-# Akses: password (belum ada kunci ke Pi). Kredensial dari env atau
-# ~/.config/pi-access/credentials.env (600) — TIDAK di-hardcode/di-repo.
+# Akses: KUNCI SSH `~/.ssh/pi4b-admin` (ed25519, ber-opsi from="10.66.66.1",
+# restrict,pty di Pi). Password TIDAK lagi disimpan; fallback password HANYA
+# kalau env PI_PASS di-set manual (mis. saat kunci rusak & perlu darurat).
+# PI_HOST dari env atau ~/.config/pi-access/credentials.env (600).
 #
 # Exit: 0 sehat / Pi memang OFF · 1 Pi HIDUP tapi ada masalah (termal/service/disk).
 set -uo pipefail
@@ -23,6 +25,7 @@ set -uo pipefail
 CRED="${PI_CRED_FILE:-$HOME/.config/pi-access/credentials.env}"
 [ -f "$CRED" ] && { set -a; . "$CRED"; set +a; }
 PI_HOST="${PI_HOST:-admin@10.66.66.4}"
+PI_KEY="${PI_KEY:-$HOME/.ssh/pi4b-admin}"
 PI_PASS="${PI_PASS:-}"
 TEMP_WARN="${TEMP_WARN:-70}"       # °C, ambang peringatan suhu
 DISK_WARN="${DISK_WARN:-90}"       # % pemakaian disk
@@ -32,15 +35,23 @@ say()  { echo "$*"; }
 warn() { echo "  !! $*"; PROBLEMS=$((PROBLEMS + 1)); }
 ok()   { echo "  ok  $*"; }
 
-if [ -z "$PI_PASS" ]; then
-  say "GAGAL: PI_PASS kosong — set env atau isi ${CRED} (PI_PASS=...)."
+# Kunci primer; password (env PI_PASS) hanya fallback darurat.
+pissh() {
+  if [ -f "$PI_KEY" ]; then
+    ssh -i "$PI_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+      -o ConnectTimeout=10 -o BatchMode=yes "$PI_HOST" "$@" 2>/dev/null
+  elif [ -n "$PI_PASS" ]; then
+    sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=accept-new \
+      -o ConnectTimeout=10 "$PI_HOST" "$@" 2>/dev/null
+  else
+    return 255
+  fi
+}
+
+if [ ! -f "$PI_KEY" ] && [ -z "$PI_PASS" ]; then
+  say "GAGAL: tak ada kunci (${PI_KEY}) maupun PI_PASS env — tak bisa akses Pi."
   exit 1
 fi
-
-pissh() {
-  sshpass -p "$PI_PASS" ssh -o StrictHostKeyChecking=accept-new \
-    -o ConnectTimeout=10 -o BatchMode=no "$PI_HOST" "$@" 2>/dev/null
-}
 
 say "=== Laporan kesehatan + termal Pi 4B (10.66.66.4) — $(date -u '+%Y-%m-%d %H:%M UTC') ==="
 
