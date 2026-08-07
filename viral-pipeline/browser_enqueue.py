@@ -18,6 +18,10 @@ TIDAK menelan itu — exit code 4 + pesan jelas + saran fallback manual enqueue.
         --min-posts N (di bawah ini = anggap gagal-senyap, default 1)
         --dry-run (scrape + tampilkan, jangan enqueue) --api URL
 
+AUTH: browser API .60 kini WAJIB Bearer token (API_KEY di .env-nya). Kunci dibaca
+dari env BROWSER_API_KEY, atau file ~/.config/browser-api/credentials.env (600).
+Tanpa kunci -> semua endpoint selain /health balas 401.
+
 Exit: 0 ok · 2 usage · 3 job failed · 4 gagal-senyap (0 post) · 5 API/timeout
 """
 import sys, os, json, time, argparse, subprocess, urllib.request, urllib.error
@@ -27,11 +31,31 @@ PLATFORMS   = {"instagram", "tiktok", "twitter"}
 CATS        = {"viral_video", "menuju_viral_video"}
 HERE        = os.path.dirname(os.path.abspath(__file__))
 ENQUEUE     = os.path.join(HERE, "enqueue.py")
+CRED_FILE   = os.path.expanduser("~/.config/browser-api/credentials.env")
+
+def load_api_key():
+    """Kunci dari env, fallback ke file kredensial durable di akses-vps."""
+    key = os.getenv("BROWSER_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        with open(CRED_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("BROWSER_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+API_KEY = load_api_key()
 
 def api(method, url, body=None, timeout=30):
     data = json.dumps(body).encode() if body is not None else None
-    req  = urllib.request.Request(url, data=data, method=method,
-                                  headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+    req  = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, json.loads(r.read().decode())
@@ -64,6 +88,11 @@ def main():
     # 1. submit job
     st, r = api("POST", f"{a.api}/scraper/jobs",
                 {"platform": a.platform, "targetUrl": a.target_url})
+    if st == 401:
+        print("[5] 401 Unauthorized dari browser API .60 — kunci API salah/tak ada.")
+        print(f"    Set env BROWSER_API_KEY, atau pastikan {CRED_FILE} berisi BROWSER_API_KEY=<kunci>.")
+        print("    Kunci harus SAMA dengan API_KEY di ~/browser/.env pada .60.")
+        sys.exit(5)
     if st != 202 or not r.get("ok"):
         print(f"[3] submit job gagal (HTTP {st}): {r.get('error','?')}"); sys.exit(3)
     jid = r["job"]["id"]
