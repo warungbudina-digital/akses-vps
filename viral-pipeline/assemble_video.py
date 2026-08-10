@@ -88,6 +88,9 @@ def main():
     ap.add_argument("--bpm", type=float, help="override bpm grid (default: bpm dari plan)")
     ap.add_argument("--beats-per-cut", type=float, default=2.0,
                     help="panjang tiap potongan dalam beat (default 2 = ~1s @120bpm)")
+    ap.add_argument("--detect-music-bpm", action="store_true",
+                    help="deteksi bpm dari --music via librosa (butuh librosa, mis. container analyzer) "
+                         "-> grid beat selaras BEAT MUSIK, bukan bpm sumber")
     # musik
     ap.add_argument("--music", help="audio latar (loop + potong ke panjang video)")
     ap.add_argument("--music-vol", type=float, default=1.0, help="volume musik (default 1.0)")
@@ -134,6 +137,23 @@ def main():
         return 3
 
     bpm = a.bpm or plan.get("bpm") or 120.0
+    # auto-deteksi bpm dari file musik (librosa) -> grid selaras beat musik nyata
+    if a.detect_music_bpm and a.music and os.path.isfile(a.music):
+        try:
+            import librosa  # hanya saat diminta -> skrip tetap portable tanpa flag ini
+            y, sr = librosa.load(a.music, mono=True)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            det = float(tempo if getattr(tempo, "ndim", 0) == 0 else tempo[0])
+            if 40.0 <= det <= 300.0:
+                log(f"  bpm musik terdeteksi (librosa): {det:.1f} (override grid; sumber={bpm})")
+                bpm = det
+            else:
+                log(f"  bpm terdeteksi {det:.1f} di luar 40-300 -> abaikan, pakai {bpm}")
+        except Exception as e:
+            log(f"  deteksi bpm gagal ({e}) -> pakai bpm={bpm}")
+    elif a.detect_music_bpm:
+        log("  --detect-music-bpm diabaikan (tak ada --music)")
+
     segs = build_segments(phases, a.beat_cut, bpm, a.beats_per_cut)
     total = round(sum(s["dur"] for s in segs), 3)
     if len(segs) > MAX_SEGMENTS:
