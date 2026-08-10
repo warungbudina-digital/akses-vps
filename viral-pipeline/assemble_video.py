@@ -13,6 +13,10 @@ Semua klip di-scale+crop 1080x1920 lalu concat, caption SRT di-burn (libass).
 
 SLOT MUSIK (--music FILE): audio latar di-loop + dipotong ke panjang video +
 volume (--music-vol) + fade in/out (--audio-fade). Tanpa --music = audio diam.
+SFX (--transition-sfx FILE): one-shot (whoosh dll) di-mix di tiap batas fase
+(atau tiap potongan beat-cut via --sfx-every-cut). SUMBER SFX/musik = Pixabay
+tapi Pixabay TAK punya API audio -> unduh file manual dari situsnya ke folder,
+lalu tunjuk lewat flag ini (gratis, tanpa atribusi per lisensi Pixabay).
 
 ⚠️ BEAT-CUT pakai **bpm SUMBER** (dari plan/analisa) sbg grid, BUKAN deteksi beat
 file musik (ffmpeg tak bisa). Kalau musik beda tempo, set --bpm agar cut selaras
@@ -88,6 +92,11 @@ def main():
     ap.add_argument("--music", help="audio latar (loop + potong ke panjang video)")
     ap.add_argument("--music-vol", type=float, default=1.0, help="volume musik (default 1.0)")
     ap.add_argument("--audio-fade", type=float, default=0.8, help="fade in/out audio detik (default 0.8)")
+    # SFX (sumber = Pixabay, unduh manual — Pixabay TAK punya API audio)
+    ap.add_argument("--transition-sfx", help="file SFX (whoosh dll, dari Pixabay) di tiap potongan")
+    ap.add_argument("--sfx-vol", type=float, default=0.8, help="volume SFX (default 0.8)")
+    ap.add_argument("--sfx-every-cut", action="store_true",
+                    help="taruh SFX di TIAP potongan beat-cut (default: hanya batas fase)")
     # video
     ap.add_argument("--width", type=int, default=W_DEF)
     ap.add_argument("--height", type=int, default=H_DEF)
@@ -167,25 +176,49 @@ def main():
     else:
         log("  caption dilewati (--no-subs / plan tanpa srt)")
 
-    # ── audio: musik (loop+vol+fade) atau diam ────────────────────────────
-    music_idx = len(segs)
+    # ── audio: base (musik loop+vol+fade / diam) + SFX Pixabay (mix) ───────
+    # Pixabay TAK punya API audio -> file SFX/musik diunduh manual dari situs.
+    AFMT = "aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo"
     fade = max(0.0, min(a.audio_fade, total / 2.0))
+    base_idx = len(segs)
     if a.music and os.path.isfile(a.music):
         inputs += ["-stream_loop", "-1", "-i", a.music]
-        af = (f"[{music_idx}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,"
-              f"volume={a.music_vol}")
+        af = f"[{base_idx}:a]atrim=0:{total:.3f},asetpts=PTS-STARTPTS,volume={a.music_vol}"
         if fade > 0.01:
-            af += f",afade=t=in:st=0:d={fade:.3f},afade=t=out:st={max(0.0,total-fade):.3f}:d={fade:.3f}"
-        af += "[aud]"
+            af += (f",afade=t=in:st=0:d={fade:.3f},"
+                   f"afade=t=out:st={max(0.0, total - fade):.3f}:d={fade:.3f}")
+        af += f",{AFMT}[abase]"
         filt.append(af)
-        amap = "[aud]"
-        log(f"  audio: musik {os.path.basename(a.music)} (loop, vol={a.music_vol}, fade={fade:.2f}s)")
+        log(f"  musik: {os.path.basename(a.music)} (loop, vol={a.music_vol}, fade={fade:.2f}s)")
     else:
         if a.music:
-            log(f"  musik tak ada ({a.music}) -> audio diam")
-        inputs += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
-        amap = f"{music_idx}:a"
-        log("  audio: diam (anullsrc)")
+            log(f"  musik tak ada ({a.music}) -> latar diam")
+        inputs += ["-f", "lavfi", "-t", f"{total:.3f}", "-i", "anullsrc=r=44100:cl=stereo"]
+        filt.append(f"[{base_idx}:a]{AFMT}[abase]")
+        log("  musik: diam (anullsrc)")
+
+    amap = "[abase]"
+    if a.transition_sfx and os.path.isfile(a.transition_sfx):
+        src = segs if a.sfx_every_cut else phases
+        acc, sfx_times = 0.0, []
+        for x in src[:-1]:
+            acc += x["dur"]
+            sfx_times.append(round(acc, 3))
+        sfx_times = [t for t in sfx_times if 0.05 < t < total - 0.05][:60]
+        labels = ["[abase]"]
+        for j, t in enumerate(sfx_times):
+            inputs += ["-i", a.transition_sfx]
+            ms = int(t * 1000)
+            filt.append(f"[{base_idx + 1 + j}:a]adelay={ms}|{ms},volume={a.sfx_vol},{AFMT}[sfx{j}]")
+            labels.append(f"[sfx{j}]")
+        if sfx_times:
+            filt.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:"
+                        f"dropout_transition=0[aout]")
+            amap = "[aout]"
+            log(f"  SFX: {os.path.basename(a.transition_sfx)} x{len(sfx_times)} "
+                f"({'tiap potongan' if a.sfx_every_cut else 'batas fase'}, vol={a.sfx_vol})")
+    elif a.transition_sfx:
+        log(f"  SFX tak ada ({a.transition_sfx}) -> dilewati")
 
     cmd = [a.ffmpeg, "-y", *inputs,
            "-filter_complex", ";".join(filt),
