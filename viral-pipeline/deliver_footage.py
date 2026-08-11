@@ -41,12 +41,18 @@ class RN7:
     def shell(self, cmd, **kw):
         return self.adb("shell", cmd, **kw)
 
-    def preflight(self):
+    def preflight(self, clean=False):
         r = self.adb("get-state")
         if "device" not in r.stdout:
             return False, f"adb tak connect ke {self.u} ({r.stdout.strip()}{r.stderr.strip()})"
         self.shell(f"mkdir -p {self.dest}")
-        return True, "adb siap"
+        if clean:
+            # kosongkan folder + rescan -> album VN-src berisi TEPAT N klip saat ini
+            # (import-clips.js pilih semua di album; hindari klip basi delivery lama)
+            self.shell(f"rm -f {self.dest}/*.mp4")
+            self.shell(f"content call --uri content://media/external/file "
+                       f"--method scan_file --arg {self.dest}")
+        return True, ("adb siap" + (" (folder dibersihkan)" if clean else ""))
 
     def push(self, host_path, remote_name):
         """host_path = file di ~/.android/vnsrc/ ; push dari path container.
@@ -97,6 +103,8 @@ def main():
                     help="verdikt yg dikirim (default semua ber-klip; EMPTY selalu skip)")
     ap.add_argument("--clips-dir", help="basis path kalau clip.source relatif/hilang")
     ap.add_argument("--no-scan", action="store_true")
+    ap.add_argument("--clean", action="store_true",
+                    help="kosongkan folder dest dulu (album VN-src = tepat N klip ini)")
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
@@ -106,7 +114,7 @@ def main():
     dev = RN7(a.container, a.udid, a.dest)
 
     if not a.dry_run:
-        ok, msg = dev.preflight()
+        ok, msg = dev.preflight(clean=a.clean)
         if not ok:
             log(f"GAGAL: {msg}")
             sys.exit(3)
