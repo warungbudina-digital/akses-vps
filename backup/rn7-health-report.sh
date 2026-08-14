@@ -44,6 +44,28 @@ flush() {
   fi
 }
 
+# Alert Telegram HANYA saat PERUBAHAN status (sehat↔bermasalah) → anti-spam.
+# Aktif bila RN7_ALERT=1 (cron). State disimpan di file; baris '!!' jadi ringkasan.
+SENDTG="$(dirname "$0")/send-telegram.sh"
+STATE_FILE="${RN7_STATE_FILE:-$HOME/.config/telegram-alert/rn7.state}"
+maybe_alert() {
+  [ "${RN7_ALERT:-0}" = "1" ] || return 0
+  local now prev
+  now=$([ "$PROBLEMS" -eq 0 ] && echo OK || echo PROBLEM)
+  prev=$(cat "$STATE_FILE" 2>/dev/null || echo INIT)
+  [ "$now" = "$prev" ] && return 0          # tak berubah → diam
+  echo "$now" > "$STATE_FILE" 2>/dev/null
+  [ -x "$SENDTG" ] || return 0
+  if [ "$now" = "PROBLEM" ]; then
+    local detail; detail=$(printf '%s' "$BUF" | grep '!!' | sed 's/^  !! /• /')
+    "$SENDTG" "🔴 RN7 (node VN) BERMASALAH — $(date -u '+%H:%M UTC')
+${detail}
+(cek daya/charger dulu; log: ~/rn7-health.log)" >/dev/null 2>&1
+  else
+    "$SENDTG" "🟢 RN7 pulih — sehat kembali $(date -u '+%H:%M UTC')." >/dev/null 2>&1
+  fi
+}
+
 adbsh() { docker exec "$ADB_CTR" sh -c "adb -s ${RN7_IP}:${PORT} shell '$1'" 2>/dev/null; }
 
 say "=== Laporan kesehatan RN7 (node VN 24/7, ${RN7_IP}) — $(date -u '+%Y-%m-%d %H:%M UTC') ==="
@@ -65,7 +87,7 @@ fi
 # Kalau tunnel benar-benar mati, hentikan di sini (lapisan 2-3 mustahil).
 if [ "$PING" -eq 0 ]; then
   say; say "RINGKASAN: ${PROBLEMS} masalah — TUNNEL DOWN. Cek: HP hidup+tercolok? WiFi Kantor up? WG app aktif?"
-  flush; exit 1
+  maybe_alert; flush; exit 1
 fi
 
 # ── Lapisan 2: ADB / wireless-debugging ──────────────────────────────────────
@@ -129,5 +151,6 @@ if [ "$PROBLEMS" -eq 0 ]; then
 else
   say "RINGKASAN: ${PROBLEMS} masalah (lihat '!!'). Cek DAYA dulu — drop RN7 hampir selalu soal charger/Doze."
 fi
+maybe_alert
 flush
 exit $(( PROBLEMS > 0 ? 1 : 0 ))
