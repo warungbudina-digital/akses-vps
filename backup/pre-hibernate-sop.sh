@@ -50,9 +50,12 @@ done
 if timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/null; then
   say "laptop: terjangkau -> tutup Chrome (tab + browser)"
   if [ "$DRY" = 1 ]; then
-    echo "    (dry-run) ssh ltap-mini: taskkill Chrome"
+    echo "    (dry-run) ssh ltap-mini: taskkill Chrome (EncodedCommand)"
   else
-    timeout 25 ssh ltap-mini 'powershell -NoProfile -Command "$n=(Get-Process chrome -ErrorAction SilentlyContinue).Count; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force; Write-Output (\"chrome proc ditutup: \"+$n)"' 2>&1 | grep -vE 'CLIXML|<Objs' | grep -iE 'chrome proc' | sed 's/^/    /'
+    # PowerShell via -EncodedCommand (base64 UTF-16LE) — hindari mimpi quoting bersarang ssh->PS.
+    PS_KILL='$n=(Get-Process chrome -ErrorAction SilentlyContinue).Count; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output ("chrome proc: "+$n+" -> "+(Get-Process chrome -ErrorAction SilentlyContinue).Count)'
+    EB=$(printf '%s' "$PS_KILL" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+    timeout 25 ssh ltap-mini "powershell -NoProfile -EncodedCommand $EB" 2>&1 | grep -vE 'CLIXML|<Objs' | grep -iE 'chrome proc' | sed 's/^/    /'
   fi
 else
   say "laptop: TAK terjangkau -> skip tutup Chrome"
