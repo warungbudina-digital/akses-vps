@@ -31,14 +31,26 @@ BATT_LOW="${BATT_LOW:-30}"              # % baterai rendah (peringatan meski cha
 # RN7_BRIEF=1 → saat SEHAT cetak 1 baris saja (untuk cron/log ringkas); saat ADA
 # MASALAH selalu cetak laporan penuh. Output di-buffer lalu di-flush di akhir.
 BRIEF="${RN7_BRIEF:-0}"
-PROBLEMS=0
+PROBLEMS=0      # semua masalah → pengaruhi exit code + tampil di log
+ALERTABLE=0    # subset yg memicu ALERT Telegram (tunnel/daya/wifi), BUKAN adb-off
 BUF=""
 say()  { BUF="${BUF}$*"$'\n'; }
-warn() { BUF="${BUF}  !! $*"$'\n'; PROBLEMS=$((PROBLEMS + 1)); }
+# warn = masalah yg LAYAK ALERT (node benar2 bermasalah: tunnel/charger/wifi).
+warn() { BUF="${BUF}  !! $*"$'\n'; PROBLEMS=$((PROBLEMS + 1)); ALERTABLE=$((ALERTABLE + 1)); }
+# note = masalah lapisan-automasi (adb/wireless-debug off) — SERING & wajar (butuh
+# toggle fisik), TAMPIL di log + pengaruhi exit, tapi TIDAK memicu alert Telegram.
+note() { BUF="${BUF}  !~ $*"$'\n'; PROBLEMS=$((PROBLEMS + 1)); }
 ok()   { BUF="${BUF}  ok  $*"$'\n'; }
 flush() {
-  if [ "$BRIEF" = "1" ] && [ "$PROBLEMS" -eq 0 ]; then
-    echo "$(date -u '+%Y-%m-%d %H:%M UTC') RN7 SEHAT — tunnel+adb+charger OK."
+  # BRIEF (cron): ringkas selama tak ada masalah ALERT-able (tunnel/daya/wifi).
+  # Isu non-kritis (adb/wireless-debug off) tetap diringkas 1 baris, tak spam log.
+  if [ "$BRIEF" = "1" ] && [ "$ALERTABLE" -eq 0 ]; then
+    local ts; ts=$(date -u '+%Y-%m-%d %H:%M UTC')
+    if [ "$PROBLEMS" -eq 0 ]; then
+      echo "$ts RN7 SEHAT — tunnel+adb+charger OK."
+    else
+      echo "$ts RN7 tunnel OK — non-kritis: $(printf '%s' "$BUF" | grep '!~' | sed 's/^  !~ //' | head -1)"
+    fi
   else
     printf '%s' "$BUF"
   fi
@@ -51,7 +63,7 @@ STATE_FILE="${RN7_STATE_FILE:-$HOME/.config/telegram-alert/rn7.state}"
 maybe_alert() {
   [ "${RN7_ALERT:-0}" = "1" ] || return 0
   local now prev
-  now=$([ "$PROBLEMS" -eq 0 ] && echo OK || echo PROBLEM)
+  now=$([ "$ALERTABLE" -eq 0 ] && echo OK || echo PROBLEM)
   prev=$(cat "$STATE_FILE" 2>/dev/null || echo INIT)
   [ "$now" = "$prev" ] && return 0          # tak berubah → diam
   echo "$now" > "$STATE_FILE" 2>/dev/null
@@ -97,9 +109,9 @@ ADB_OK=0
 if [ -n "$PORT" ]; then
   docker exec "$ADB_CTR" sh -c "adb connect ${RN7_IP}:${PORT}" >/dev/null 2>&1
   if [ "$(adbsh 'echo ok' | tr -d '\r')" = "ok" ]; then ok "adb tersambung di :${PORT}."; ADB_OK=1
-  else warn "port :${PORT} terbuka tapi adb echo gagal (adbd sibuk/unauthorized)."; fi
+  else note "port :${PORT} terbuka tapi adb echo gagal (adbd sibuk/unauthorized)."; fi
 else
-  warn "tak ada port adb di ${PORT_LO}-${PORT_HI} — Wireless debugging OFF (butuh toggle FISIK di HP; crDroid tak persisten). Tunnel tetap hidup."
+  note "tak ada port adb di ${PORT_LO}-${PORT_HI} — Wireless debugging OFF (butuh toggle FISIK di HP; crDroid tak persisten). Tunnel tetap hidup."
 fi
 
 # ── Lapisan 3: DEVICE (hanya jika adb hidup) ─────────────────────────────────
