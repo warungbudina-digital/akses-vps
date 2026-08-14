@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Laporan kesehatan RN7 (Redmi Note 7, node VN otomasi 24/7 — WG peer 10.66.66.6).
 #
-# KONTEKS (2026-08-14): RN7 = node 24/7 (BEDA dari Pi yang terjadwal) → tak
+# KONTEKS (2026-08-14): RN7 = node 24/7 (BEDA dari Pi yang terjadwal) -> tak
 # terjangkau = MASALAH, bukan normal. Temuan akar instabilitas: tunnel RN7 SUDAH
 # lewat WiFi "Kantor" (bukan seluler); drop berulang wireless-debugging = DAYA —
-# saat HP tak tercolok → Doze → WiFi power-save → tunnel+adbd putus. Karena itu
+# saat HP tak tercolok -> Doze -> WiFi power-save -> tunnel+adbd putus. Karena itu
 # HEADLINE skrip ini = STATUS CHARGING. Detail: [[project_redmi_vn_node]] + repo
 # tool-appium docs/vn-automation-map.md §27g/§27j-F.
 #
 # Tiga lapisan yang dicek (dari sisi akses-vps):
 #   1) TUNNEL  — ping 10.66.66.6 + umur handshake WireGuard (sisi server, sudo wg).
-#   2) ADB     — wireless-debugging (port acak 30000-45000, connect-scan) + adb echo.
-#                adb mati tapi tunnel hidup = wireless-debug drop (butuh toggle fisik).
+#   2) ADB     — port TCP 5555 PERMANEN (persist.adb.tcp.port; lepas dari wireless-
+#                debugging). Fallback scan 30000-45000 utk kompat lama. adb echo cek.
 #   3) DEVICE  — HANYA jika adb hidup: charging/baterai (HEADLINE), stayon/layar,
 #                WiFi SSID+RSSI, keberadaan app VN.
 #
@@ -28,10 +28,10 @@ PORT_LO="${PORT_LO:-30000}"; PORT_HI="${PORT_HI:-45000}"
 HS_WARN="${HS_WARN:-300}"                # detik; handshake > ini = tunnel diragukan
 BATT_LOW="${BATT_LOW:-30}"              # % baterai rendah (peringatan meski charging)
 
-# RN7_BRIEF=1 → saat SEHAT cetak 1 baris saja (untuk cron/log ringkas); saat ADA
+# RN7_BRIEF=1 -> saat SEHAT cetak 1 baris saja (untuk cron/log ringkas); saat ADA
 # MASALAH selalu cetak laporan penuh. Output di-buffer lalu di-flush di akhir.
 BRIEF="${RN7_BRIEF:-0}"
-PROBLEMS=0      # semua masalah → pengaruhi exit code + tampil di log
+PROBLEMS=0      # semua masalah -> pengaruhi exit code + tampil di log
 ALERTABLE=0    # subset yg memicu ALERT Telegram (tunnel/daya/wifi), BUKAN adb-off
 BUF=""
 say()  { BUF="${BUF}$*"$'\n'; }
@@ -56,7 +56,7 @@ flush() {
   fi
 }
 
-# Alert Telegram HANYA saat PERUBAHAN status (sehat↔bermasalah) → anti-spam.
+# Alert Telegram HANYA saat PERUBAHAN status (sehat↔bermasalah) -> anti-spam.
 # Aktif bila RN7_ALERT=1 (cron). State disimpan di file; baris '!!' jadi ringkasan.
 SENDTG="$(dirname "$0")/send-telegram.sh"
 STATE_FILE="${RN7_STATE_FILE:-$HOME/.config/telegram-alert/rn7.state}"
@@ -65,7 +65,7 @@ maybe_alert() {
   local now prev
   now=$([ "$ALERTABLE" -eq 0 ] && echo OK || echo PROBLEM)
   prev=$(cat "$STATE_FILE" 2>/dev/null || echo INIT)
-  [ "$now" = "$prev" ] && return 0          # tak berubah → diam
+  [ "$now" = "$prev" ] && return 0          # tak berubah -> diam
   echo "$now" > "$STATE_FILE" 2>/dev/null
   [ -x "$SENDTG" ] || return 0
   if [ "$now" = "PROBLEM" ]; then
@@ -102,22 +102,29 @@ if [ "$PING" -eq 0 ]; then
   maybe_alert; flush; exit 1
 fi
 
-# ── Lapisan 2: ADB / wireless-debugging ──────────────────────────────────────
-say "[ADB] wireless-debugging (adb-over-tunnel)"
-PORT=$(nmap -sT -Pn -p"${PORT_LO}-${PORT_HI}" --open "$RN7_IP" 2>/dev/null | grep -oE '^[0-9]+' | head -1)
+# ── Lapisan 2: ADB (port TCP 5555 PERMANEN; fallback scan wireless-debug lama) ──
+say "[ADB] adb-over-tunnel (5555 permanen)"
+FIXED_PORT="${RN7_ADB_PORT:-5555}"
+# Coba dulu port tetap 5555 (persist.adb.tcp.port, lepas dari wireless-debugging).
+if nmap -sT -Pn -p"$FIXED_PORT" "$RN7_IP" 2>/dev/null | grep -q "^${FIXED_PORT}/tcp open"; then
+  PORT="$FIXED_PORT"
+else
+  # Fallback: scan rentang wireless-debug (kalau 5555 belum bind, mis. pra-reboot lama).
+  PORT=$(nmap -sT -Pn -p"${PORT_LO}-${PORT_HI}" --open "$RN7_IP" 2>/dev/null | grep -oE '^[0-9]+' | head -1)
+fi
 ADB_OK=0
 if [ -n "$PORT" ]; then
   docker exec "$ADB_CTR" sh -c "adb connect ${RN7_IP}:${PORT}" >/dev/null 2>&1
   if [ "$(adbsh 'echo ok' | tr -d '\r')" = "ok" ]; then ok "adb tersambung di :${PORT}."; ADB_OK=1
   else note "port :${PORT} terbuka tapi adb echo gagal (adbd sibuk/unauthorized)."; fi
 else
-  note "tak ada port adb di ${PORT_LO}-${PORT_HI} — Wireless debugging OFF (butuh toggle FISIK di HP; crDroid tak persisten). Tunnel tetap hidup."
+  note "adb tak listening (5555 mati & tak ada port wireless-debug) — cek adbd/USB-debugging; biasanya pulih sendiri setelah reboot krn persist.adb.tcp.port=5555. Tunnel tetap hidup."
 fi
 
 # ── Lapisan 3: DEVICE (hanya jika adb hidup) ─────────────────────────────────
 if [ "$ADB_OK" -eq 1 ]; then
   # Tarik output mentah, parse di sisi akses-vps (hindari substitusi bersarang
-  # yang rusak lewat lapisan docker→adb→shell).
+  # yang rusak lewat lapisan docker->adb->shell).
   BATT=$(adbsh 'dumpsys battery')
   POW=$(adbsh 'dumpsys power')
   WIFI=$(adbsh 'dumpsys wifi | grep -m1 mWifiInfo')
@@ -134,8 +141,8 @@ if [ "$ADB_OK" -eq 1 ]; then
 
   say "[DAYA] HEADLINE — akar stabilitas node"
   case "$AC" in
-    true)  ok "AC charging (tercolok). Doze tak aktif → WiFi stabil." ;;
-    false) warn "TAK tercolok charger (status=${BST:-?}) — akan Doze → WiFi power-save → tunnel/adb DROP. COLOK CHARGER." ;;
+    true)  ok "AC charging (tercolok). Doze tak aktif -> WiFi stabil." ;;
+    false) warn "TAK tercolok charger (status=${BST:-?}) — akan Doze -> WiFi power-save -> tunnel/adb DROP. COLOK CHARGER." ;;
     *)     warn "status charging tak terbaca (AC=${AC:-?})." ;;
   esac
   if [ -n "$LVL" ]; then
@@ -143,7 +150,7 @@ if [ "$ADB_OK" -eq 1 ]; then
   fi
 
   say "[KEEP-AWAKE]"
-  [ "$STAYON" = "true" ] && ok "mStayOn=true (layar nyala saat plugged)." || warn "mStayOn=${STAYON:-?} — layar bisa mati → Doze (cek stay_on_while_plugged_in & charger)."
+  [ "$STAYON" = "true" ] && ok "mStayOn=true (layar nyala saat plugged)." || warn "mStayOn=${STAYON:-?} — layar bisa mati -> Doze (cek stay_on_while_plugged_in & charger)."
   [ "$WAKE" = "Awake" ]  && ok "layar Awake." || say "  -- wakefulness=${WAKE:-?} (Asleep/Dozing = sumber drop kalau menetap)."
 
   say "[WIFI]"
