@@ -92,10 +92,14 @@ if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 true 2>/dev/null; then
     log ".61 (gogobuda) reachable -> bring-up n8n-uploader"
     # shellcheck disable=SC1090
     set -a; . "$N8N_CRED"; . "$N8N_OAUTH"; set +a
-    # sinkron token.json Gdrive dari hub kalau ada salinan durable (opsional -
-    # kalau belum ada, deploy.sh sendiri berhenti jelas di configure_rclone).
+    # token.json (kalau ada salinan durable di hub) di-embed base64 LANGSUNG di
+    # heredoc yg sama (ditulis SETELAH clone/pull, bukan sebelum via SSH terpisah)
+    # - urutan lama (mkdir dulu -> git clone) GAGAL krn git clone menolak target
+    # dir yg sudah ada isinya (persis bug yg kejadian 2026-08-15). Sekalian
+    # hemat 1 round-trip SSH (kurangi peluang kena putus sesi ephemeral).
+    TOKEN_B64=""
     if [ -f "$N8N_TOKEN_SRC" ]; then
-      ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 'mkdir -p ~/mcp-video-editor && cat > ~/mcp-video-editor/token.json' < "$N8N_TOKEN_SRC" 2>>"$LOG"
+      TOKEN_B64="$(base64 -w0 "$N8N_TOKEN_SRC" 2>/dev/null || base64 "$N8N_TOKEN_SRC" | tr -d '\n')"
     fi
     if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 bash -s >>"$LOG" 2>&1 <<REMOTE_EOF
 set -euo pipefail
@@ -105,6 +109,10 @@ if [ -d mcp-video-editor/.git ]; then
 else
   git clone https://github.com/warungbudina-digital/mcp-video-editor.git
   cd mcp-video-editor
+fi
+TOKEN_B64='$TOKEN_B64'
+if [ -n "\$TOKEN_B64" ]; then
+  echo "\$TOKEN_B64" | base64 -d > token.json
 fi
 export DB_POSTGRESDB_HOST='$DB_POSTGRESDB_HOST'
 export DB_POSTGRESDB_PORT='$DB_POSTGRESDB_PORT'
