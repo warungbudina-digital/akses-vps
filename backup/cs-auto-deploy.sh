@@ -12,7 +12,8 @@
 #                              penuh, idempoten; auto docker-rm kalau container lama ternyata
 #                              V1, krn bring-up-analyzer.sh sendiri tak deteksi varian)
 #   balibruntattour (.60)  -> bring-up-browser.sh      (clone+build+deploy penuh, idempoten)
-#   gogobuda (.61)         -> HANYA git clone n8n-io/n8n (TANPA deploy/setup — user audit dulu)
+#   gogobuda (.61)         -> HANYA git clone warungbudina-digital/mcp-video-editor (TANPA
+#                              deploy/setup — user audit+rombak dulu)
 #
 # flock cegah tumpang-tindih antar-tick cron (build/clone bisa makan menit).
 # =====================================================================
@@ -75,14 +76,14 @@ else
   log ".60 (balibruntattour) belum reachable - skip."
 fi
 
-# --- gogobuda (.61) -> HANYA git clone n8n, TANPA deploy (user audit manual dulu) ---
+# --- gogobuda (.61) -> HANYA git clone mcp-video-editor, TANPA deploy (user audit+rombak dulu) ---
 if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 true 2>/dev/null; then
-  log ".61 (gogobuda) reachable -> pastikan clone n8n-io/n8n (TANPA deploy)"
+  log ".61 (gogobuda) reachable -> pastikan clone mcp-video-editor (TANPA deploy)"
   if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 \
-      'if [ -d "$HOME/n8n/.git" ]; then echo "n8n sudah ter-clone, skip."; else git clone --depth 1 https://github.com/n8n-io/n8n.git "$HOME/n8n" && echo "n8n clone OK (shallow, TANPA setup/deploy)."; fi' >>"$LOG" 2>&1; then
-    log ".61 n8n clone-check selesai."
+      'if [ -d "$HOME/mcp-video-editor/.git" ]; then echo "mcp-video-editor sudah ter-clone, skip."; else git clone https://github.com/warungbudina-digital/mcp-video-editor.git "$HOME/mcp-video-editor" && echo "mcp-video-editor clone OK (TANPA setup/deploy)."; fi' >>"$LOG" 2>&1; then
+    log ".61 mcp-video-editor clone-check selesai."
   else
-    log ".61 n8n clone GAGAL (lihat baris di atas)."
+    log ".61 mcp-video-editor clone GAGAL (lihat baris di atas)."
   fi
 else
   log ".61 (gogobuda) belum reachable - skip."
