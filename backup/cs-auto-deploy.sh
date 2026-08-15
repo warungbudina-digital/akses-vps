@@ -8,7 +8,9 @@
 # yang sudah di-SOP-kan. No-op anggun kalau profil belum/tak reachable
 # (NORMAL — laptop node terjadwal, tak selalu hidup).
 #
-#   yuni (.50)             -> bring-up-analyzer.sh v1 (clone+build+deploy penuh, idempoten)
+#   yuni (.50)             -> bring-up-analyzer.sh v2 (ML: whisper+CLIP, clone+build+deploy
+#                              penuh, idempoten; auto docker-rm kalau container lama ternyata
+#                              V1, krn bring-up-analyzer.sh sendiri tak deteksi varian)
 #   balibruntattour (.60)  -> bring-up-browser.sh      (clone+build+deploy penuh, idempoten)
 #   gogobuda (.61)         -> HANYA git clone n8n-io/n8n (TANPA deploy/setup — user audit dulu)
 #
@@ -32,13 +34,30 @@ if [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 2000 ]; then
   tail -n 800 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
 fi
 
-# --- yuni (.50) -> viral_analyzer (full bring-up) ---
+# --- yuni (.50) -> viral_analyzer V2 (full bring-up) ---
 if ssh "${SSHOPTS[@]}" warungbudina@10.66.66.50 true 2>/dev/null; then
-  log ".50 (yuni) reachable -> bring-up analyzer v1"
-  if ssh "${SSHOPTS[@]}" warungbudina@10.66.66.50 'bash -s -- v1' < "$HOME/viral-pipeline/bring-up-analyzer.sh" >>"$LOG" 2>&1; then
-    log ".50 analyzer bring-up OK."
+  log ".50 (yuni) reachable -> pastikan analyzer V2 (ML) jalan"
+  IS_V2="$(ssh "${SSHOPTS[@]}" warungbudina@10.66.66.50 'bash -s' <<'CHECKEOF' 2>/dev/null
+H=$(curl -sf http://127.0.0.1:9021/healthz 2>/dev/null)
+if echo "$H" | grep -q '"asr": *true' && echo "$H" | grep -q '"semantic": *true'; then
+  echo 1
+else
+  echo 0
+fi
+CHECKEOF
+)"
+  [ -z "$IS_V2" ] && IS_V2=0
+  if [ "$IS_V2" = "1" ]; then
+    log ".50 analyzer V2 SUDAH jalan sehat, skip rebuild."
   else
-    log ".50 analyzer bring-up GAGAL (lihat baris di atas)."
+    # container lama (kalau ada) BUKAN V2 (mis. masih V1 dari sebelumnya) -> bring-up-analyzer.sh
+    # sendiri tak deteksi varian (cuma cek /healthz ada-tidaknya), jadi hapus dulu biar ke-rebuild V2.
+    ssh "${SSHOPTS[@]}" warungbudina@10.66.66.50 'docker rm -f viral_analyzer 2>/dev/null || true' >>"$LOG" 2>&1
+    if ssh "${SSHOPTS[@]}" warungbudina@10.66.66.50 'bash -s -- v2' < "$HOME/viral-pipeline/bring-up-analyzer.sh" >>"$LOG" 2>&1; then
+      log ".50 analyzer V2 bring-up OK."
+    else
+      log ".50 analyzer V2 bring-up GAGAL (lihat baris di atas)."
+    fi
   fi
 else
   log ".50 (yuni) belum reachable - skip (normal kalau laptop/bootstrap belum jalan)."
