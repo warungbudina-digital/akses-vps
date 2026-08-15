@@ -121,7 +121,7 @@ REMOTE_EOF
     then
       log ".61 n8n-uploader bring-up OK."
     else
-      log ".61 n8n-uploader bring-up GAGAL atau BELUM LENGKAP (lihat baris di atas — kandidat penyebab: token.json Gdrive belum diisi asli)."
+      log ".61 n8n-uploader bring-up GAGAL atau BELUM LENGKAP (lihat baris detail di atas utk sebab pasti - bisa token.json blm ada, sesi ephemeral putus di tengah jalan, atau lainnya)."
     fi
   fi
 else
