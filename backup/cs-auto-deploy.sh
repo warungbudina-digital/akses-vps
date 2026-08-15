@@ -83,14 +83,15 @@ fi
 
 # --- gogobuda (.61) -> n8n-uploader (full bring-up, Postgres DB-VPS + WG-only) ---
 N8N_CRED="$HOME/.config/n8n-uploader/credentials.env"
+N8N_OAUTH="$HOME/.config/n8n-uploader/oauth-client.env"
 N8N_TOKEN_SRC="$HOME/.config/n8n-uploader/token.json"
 if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 true 2>/dev/null; then
-  if [ ! -f "$N8N_CRED" ]; then
-    log ".61 (gogobuda) reachable TAPI kredensial belum ada ($N8N_CRED) - skip deploy."
+  if [ ! -f "$N8N_CRED" ] || [ ! -f "$N8N_OAUTH" ]; then
+    log ".61 (gogobuda) reachable TAPI kredensial belum lengkap ($N8N_CRED / $N8N_OAUTH) - skip deploy."
   else
     log ".61 (gogobuda) reachable -> bring-up n8n-uploader"
     # shellcheck disable=SC1090
-    set -a; . "$N8N_CRED"; set +a
+    set -a; . "$N8N_CRED"; . "$N8N_OAUTH"; set +a
     # sinkron token.json Gdrive dari hub kalau ada salinan durable (opsional -
     # kalau belum ada, deploy.sh sendiri berhenti jelas di configure_rclone).
     if [ -f "$N8N_TOKEN_SRC" ]; then
@@ -110,6 +111,8 @@ export DB_POSTGRESDB_PORT='$DB_POSTGRESDB_PORT'
 export DB_POSTGRESDB_DATABASE='$DB_POSTGRESDB_DATABASE'
 export DB_POSTGRESDB_USER='$DB_POSTGRESDB_USER'
 export DB_POSTGRESDB_PASSWORD='$DB_POSTGRESDB_PASSWORD'
+export RCLONE_CLIENT_ID='$RCLONE_CLIENT_ID'
+export RCLONE_CLIENT_SECRET='$RCLONE_CLIENT_SECRET'
 export N8N_ENCRYPTION_KEY='$N8N_ENCRYPTION_KEY'
 export N8N_BASIC_AUTH_USER='$N8N_BASIC_AUTH_USER'
 export N8N_BASIC_AUTH_PASSWORD='$N8N_BASIC_AUTH_PASSWORD'
