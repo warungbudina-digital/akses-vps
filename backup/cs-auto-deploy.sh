@@ -12,8 +12,13 @@
 #                              penuh, idempoten; auto docker-rm kalau container lama ternyata
 #                              V1, krn bring-up-analyzer.sh sendiri tak deteksi varian)
 #   balibruntattour (.60)  -> bring-up-browser.sh      (clone+build+deploy penuh, idempoten)
-#   gogobuda (.61)         -> HANYA git clone warungbudina-digital/mcp-video-editor (TANPA
-#                              deploy/setup — user audit+rombak dulu)
+#   gogobuda (.61)         -> n8n-uploader (repo mcp-video-editor, direstruktur
+#                              2026-08-15): full bring-up, state di Postgres DB-VPS
+#                              (role/db `n8n_uploader`, pg_hba SEMPIT cuma
+#                              10.66.66.61/32) + N8N_ENCRYPTION_KEY durable +
+#                              basic-auth — kredensial di-inject dari
+#                              ~/.config/n8n-uploader/credentials.env (hub, 600).
+#                              WireGuard-only (5678), TANPA Cloudflare Tunnel.
 #
 # flock cegah tumpang-tindih antar-tick cron (build/clone bisa makan menit).
 # =====================================================================
@@ -76,14 +81,45 @@ else
   log ".60 (balibruntattour) belum reachable - skip."
 fi
 
-# --- gogobuda (.61) -> HANYA git clone mcp-video-editor, TANPA deploy (user audit+rombak dulu) ---
+# --- gogobuda (.61) -> n8n-uploader (full bring-up, Postgres DB-VPS + WG-only) ---
+N8N_CRED="$HOME/.config/n8n-uploader/credentials.env"
+N8N_TOKEN_SRC="$HOME/.config/n8n-uploader/token.json"
 if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 true 2>/dev/null; then
-  log ".61 (gogobuda) reachable -> pastikan clone mcp-video-editor (TANPA deploy)"
-  if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 \
-      'if [ -d "$HOME/mcp-video-editor/.git" ]; then echo "mcp-video-editor sudah ter-clone, skip."; else git clone https://github.com/warungbudina-digital/mcp-video-editor.git "$HOME/mcp-video-editor" && echo "mcp-video-editor clone OK (TANPA setup/deploy)."; fi' >>"$LOG" 2>&1; then
-    log ".61 mcp-video-editor clone-check selesai."
+  if [ ! -f "$N8N_CRED" ]; then
+    log ".61 (gogobuda) reachable TAPI kredensial belum ada ($N8N_CRED) - skip deploy."
   else
-    log ".61 mcp-video-editor clone GAGAL (lihat baris di atas)."
+    log ".61 (gogobuda) reachable -> bring-up n8n-uploader"
+    # shellcheck disable=SC1090
+    set -a; . "$N8N_CRED"; set +a
+    # sinkron token.json Gdrive dari hub kalau ada salinan durable (opsional -
+    # kalau belum ada, deploy.sh sendiri berhenti jelas di configure_rclone).
+    if [ -f "$N8N_TOKEN_SRC" ]; then
+      ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 'mkdir -p ~/mcp-video-editor && cat > ~/mcp-video-editor/token.json' < "$N8N_TOKEN_SRC" 2>>"$LOG"
+    fi
+    if ssh "${SSHOPTS[@]}" gogobuda65@10.66.66.61 bash -s >>"$LOG" 2>&1 <<REMOTE_EOF
+set -euo pipefail
+cd ~
+if [ -d mcp-video-editor/.git ]; then
+  cd mcp-video-editor && git pull --ff-only
+else
+  git clone https://github.com/warungbudina-digital/mcp-video-editor.git
+  cd mcp-video-editor
+fi
+export DB_POSTGRESDB_HOST='$DB_POSTGRESDB_HOST'
+export DB_POSTGRESDB_PORT='$DB_POSTGRESDB_PORT'
+export DB_POSTGRESDB_DATABASE='$DB_POSTGRESDB_DATABASE'
+export DB_POSTGRESDB_USER='$DB_POSTGRESDB_USER'
+export DB_POSTGRESDB_PASSWORD='$DB_POSTGRESDB_PASSWORD'
+export N8N_ENCRYPTION_KEY='$N8N_ENCRYPTION_KEY'
+export N8N_BASIC_AUTH_USER='$N8N_BASIC_AUTH_USER'
+export N8N_BASIC_AUTH_PASSWORD='$N8N_BASIC_AUTH_PASSWORD'
+bash n8n-script.sh
+REMOTE_EOF
+    then
+      log ".61 n8n-uploader bring-up OK."
+    else
+      log ".61 n8n-uploader bring-up GAGAL atau BELUM LENGKAP (lihat baris di atas — kandidat penyebab: token.json Gdrive belum diisi asli)."
+    fi
   fi
 else
   log ".61 (gogobuda) belum reachable - skip."
