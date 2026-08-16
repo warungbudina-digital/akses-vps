@@ -56,10 +56,21 @@ notify(){
 }
 
 # ---- Prasyarat: laptop hidup? ----
+# ⚠️ TAK notify tiap kali (2x/hari, false-alarm wajar kalau laptop resume
+# telat beberapa detik) -- TAPI kalau sampai gagal 2x TICK BERTURUT-TURUT
+# (state file), itu pola nyata (mis. jadwal RTC-wake salah/rusak) -> alert.
+STATE="$HOME/.wake-orchestrator-unreachable.count"
 if ! timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/null; then
   log "laptop TAK terjangkau -> batal total (normal kalau belum wake/masih hibernasi)."
+  n=0; [ -f "$STATE" ] && n="$(cat "$STATE" 2>/dev/null || echo 0)"
+  n=$((n + 1))
+  echo "$n" > "$STATE"
+  if [ "$n" -ge 2 ]; then
+    notify "⚠️ wake-orchestrator: laptop TAK terjangkau ${n}x tick berturut-turut. Kemungkinan RTC-wake gagal/jadwal salah -- cek fisik laptop."
+  fi
   exit 0
 fi
+rm -f "$STATE"
 log "laptop terjangkau -> mulai alur bertahap 3 profil."
 
 # open_cs_profile <task-name-suffix> -> trigger task open-cs-<X> di laptop
