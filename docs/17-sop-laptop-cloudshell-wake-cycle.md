@@ -9,8 +9,9 @@
 ## 1. Apa sistem ini
 
 Laptop **SUARAHATI** (ASUS X450EA, lemah — AMD E1-2500, 2 core) bukan
-node 24/7. Dia **hibernate tiap malam, wake tiap pagi**, dan selama
-"hidup" dia jadi host untuk **3 sesi Google Cloud Shell** (VM gratis
+node 24/7. Dia **wake↔hibernate 2 SIKLUS/hari** (pagi + siang-malam,
+lihat §2), dan selama "hidup" dia jadi host untuk **3 sesi Google
+Cloud Shell** (VM gratis
 ephemeral Google, masing-masing terikat ke satu akun/profil Chrome),
 tiap sesi menjalankan satu project:
 
@@ -25,16 +26,31 @@ bikin CPU kewalahan → banyak gagal (bukti nyata 2026-08-16: 2 dari 3
 gagal saat dibuka bersamaan). Makanya alur sekarang **bertahap satu
 per satu**, lihat §3.
 
-## 2. Siklus harian (jam WITA, UTC = WITA − 8)
+## 2. Siklus harian — 2 SIKLUS/hari (jam WITA, UTC = WITA − 8)
+
+**✅ 2026-08-16 (v2):** diubah dari 1 siklus/hari (wake pagi → hibernate
+malam nonstop) jadi **2 siklus/hari** dgn jeda istirahat siang, atas
+permintaan user. Karena Cloud Shell **ephemeral**, tiap wake = VM
+Cloud Shell BARU (bukan lanjutan sesi lama) → project (terutama
+analyzer yuni, ~13-15mnt kalau build dari nol) **bisa ke-build ulang
+2×/hari**. Ini KONSEKUENSI YANG DITERIMA (keputusan user), bukan bug.
 
 | Jam WITA | Jam UTC | Kejadian | Dikendalikan dari |
 |---|---|---|---|
-| 08:45 | 00:45 | Laptop **wake** (RTC scheduled-wake, task `NodeWake-0845`) | Laptop (Task Scheduler lokal) |
-| 08:45:20 | 00:45:20 | `ensure-chrome-cdp` pastikan Chrome+CDP port 9222 hidup | Laptop |
-| **08:48** | **00:48** | **`wake-orchestrator.sh` mulai** — alur bertahap 3 profil (§3) | **HUB (cron)** |
-| 08-22 | 00-14 | `cs-auto-deploy.sh` jalan tiap 5 menit sbg **jaring pengaman** (§4) | HUB (cron) |
-| 22:27 | 14:27 | `pre-hibernate-sop.sh` — stop container node + tutup Chrome laptop dgn rapi (§5) | HUB (cron) |
-| 22:30 | 14:30 | Laptop **hibernate** (task `NodeHibernate-2230`) | Laptop (Task Scheduler lokal) |
+| **08:30** | 00:30 | Laptop **wake #1** (RTC, task `NodeWake-0830`) | Laptop (Task Scheduler lokal) |
+| 08:30:20 | 00:30:20 | `ensure-chrome-cdp` pastikan Chrome+CDP hidup (trigger event-wake, otomatis di KEDUA wake) | Laptop |
+| **08:33** | **00:33** | **`wake-orchestrator.sh` mulai** — alur bertahap 3 profil (§3) | **HUB (cron)** |
+| 08:30–12:35 | 00:30–04:35 | `cs-auto-deploy.sh` jalan tiap 5 menit sbg **jaring pengaman** (§4) | HUB (cron) |
+| **12:32** | **04:32** | `pre-hibernate-sop.sh` — stop container node + tutup Chrome laptop dgn rapi (§5) | HUB (cron) |
+| **12:35** | **04:35** | Laptop **break/hibernate #1** (task `NodeBreak-1235`) | Laptop (Task Scheduler lokal) |
+| 12:35–13:00 | 04:35–05:00 | **Jeda istirahat 25 menit** — laptop tidur, semua no-op wajar | — |
+| **13:00** | **05:00** | Laptop **wake #2** (RTC, task `NodeWake2-1300`) | Laptop (Task Scheduler lokal) |
+| **13:03** | **05:03** | **`wake-orchestrator.sh` mulai lagi** — alur bertahap 3 profil dari nol (VM baru) | **HUB (cron)** |
+| 13:00–22:45 | 05:00–14:45 | `cs-auto-deploy.sh` jaring pengaman lanjut | HUB (cron) |
+| **22:42** | **14:42** | `pre-hibernate-sop.sh` — penutupan malam | HUB (cron) |
+| **22:45** | **14:45** | Laptop **hibernate total** (task `NodeHibernate-2245`) | Laptop (Task Scheduler lokal) |
+
+Siklus ini berulang tiap hari (`DaysInterval=1` di keempat task Windows).
 
 **Prinsip kunci:** laptop TAK PERNAH mengambil keputusan sendiri soal
 "buka profil mana, deploy apa" — itu semua diperintah dari **HUB**
@@ -181,8 +197,10 @@ dari hub).
 ### Scheduled Task di laptop
 | Task | Trigger otomatis? | Kapan dipakai |
 |---|---|---|
-| `NodeWake-0845` | Ya, harian 08:45 | RTC wake |
-| `NodeHibernate-2230` | Ya, harian 22:30 | Hibernate |
+| `NodeWake-0830` | Ya, harian 08:30 | RTC wake #1 (v2, ganti `NodeWake-0845` lama) |
+| `NodeBreak-1235` | Ya, harian 12:35 | Break/hibernate siang (v2, BARU) |
+| `NodeWake2-1300` | Ya, harian 13:00 | RTC wake #2 (v2, BARU) |
+| `NodeHibernate-2245` | Ya, harian 22:45 | Hibernate malam (v2, ganti `NodeHibernate-2230` lama) |
 | `ensure-chrome-cdp` | Ya, tiap wake-event+logon | Jaga CDP hidup |
 | `open-cs-yuni` | **Tidak** (dicabut 2026-08-16) | Hub trigger via `schtasks /run` |
 | `open-cs-balibruntattour` | **Tidak** | Hub trigger via `schtasks /run` |
@@ -225,7 +243,17 @@ ssh ltap-mini "schtasks /run /tn open-cs"
 dokumen ini. Cuma utk darurat/testing.)
 
 ## 8. Riwayat perubahan
-- **2026-08-16**: redesign total dari "buka 3 tab staggered lalu deploy
-  async via cron 5-menitan" (banyak gagal krn resource-starvation laptop
-  lemah) menjadi alur bertahap ketat per-profil (dokumen ini). Sekaligus
-  fix bug Chrome auto-restore-sesi pasca `pre-hibernate-sop.sh` (§5c).
+- **2026-08-16 (v1)**: redesign total dari "buka 3 tab staggered lalu
+  deploy async via cron 5-menitan" (banyak gagal krn resource-starvation
+  laptop lemah) menjadi alur bertahap ketat per-profil (dokumen ini).
+  Sekaligus fix bug Chrome auto-restore-sesi pasca `pre-hibernate-sop.sh`
+  (§5c).
+- **2026-08-16 (v2, sore hari)**: jadwal diubah dari 1 siklus/hari jadi
+  **2 siklus/hari** dgn jeda istirahat siang 12:35–13:00 WITA (§2). Task
+  Windows laptop di-rename total (`NodeWake-0830`/`NodeBreak-1235`/
+  `NodeWake2-1300`/`NodeHibernate-2245`, `NodeWake-0845`/
+  `NodeHibernate-2230` lama dihapus). Cron hub: `wake-orchestrator.sh`
+  & `pre-hibernate-sop.sh` masing2 jadi 2× jadwal/hari. Konsekuensi
+  diterima: build project (terutama analyzer yuni) berpotensi 2×/hari
+  krn Cloud Shell ephemeral (tiap wake = VM baru, tak ada cache
+  persisten lintas siklus).
