@@ -53,7 +53,18 @@ if timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/nu
     echo "    (dry-run) ssh ltap-mini: taskkill Chrome (EncodedCommand)"
   else
     # PowerShell via -EncodedCommand (base64 UTF-16LE) — hindari mimpi quoting bersarang ssh->PS.
-    PS_KILL='$n=(Get-Process chrome -ErrorAction SilentlyContinue).Count; Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output ("chrome proc: "+$n+" -> "+(Get-Process chrome -ErrorAction SilentlyContinue).Count)'
+    # GRACEFUL dulu (CloseMainWindow = WM_CLOSE), baru fallback Force kalau ada
+    # proses yg masih nyangkut setelah jeda (jangan sampai skrip macet nunggu
+    # window respons selamanya — Cloud Shell kerap punya dialog beforeunload
+    # yg mengganjal CloseMainWindow, ujung-ujungnya tetap Force juga).
+    # ⚠️ Force-kill (baik CloseMainWindow yg gagal maupun fallback Force) SELALU
+    # bikin Chrome nyatat exit_type="Crashed" -> pas dibuka lagi di wake, Chrome
+    # AUTO-RESTORE sesi/tab lama (persis yg dikeluhkan user "sisa aplikasi kemarin
+    # masih ada"). Makanya SETELAH proses benar2 mati, exit_type dipatch manual
+    # jadi "Normal" di file Preferences tiap profil Cloud Shell (Profile 10/26/29
+    # = yuni/gogobuda/balibruntattour) — teknik standar cegah restore-prompt,
+    # TAK menyentuh password/cookies/history, cuma flag housekeeping ini.
+    PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'
     EB=$(printf '%s' "$PS_KILL" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
     timeout 25 ssh ltap-mini "powershell -NoProfile -EncodedCommand $EB" 2>&1 | grep -vE 'CLIXML|<Objs' | grep -iE 'chrome proc' | sed 's/^/    /'
   fi
