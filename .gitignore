@@ -3,6 +3,11 @@ docs/.local-credentials/
 .env
 genieacs/genieacs.env
 mosquitto/config/passwd
+# Hostinger API token (aslinya di ~/.config/hostinger/, di luar repo - baris
+# ini cuma jaring pengaman kalau file/folder sejenis pernah dibuat di dalam repo)
+hostinger/
+*hostinger*token*
+claude-hostinger-token*
 # FreeRADIUS's own default "snakeoil" TLS certs/keys, extracted from the
 # freeradius/freeradius-server image so the bind-mounted raddb tree is
 # complete (see docker-compose.reference.yml's freeradius volume comment).
