@@ -12,7 +12,8 @@
 | **Private storage** | **100 GB gratis** | dataset repo privat = "database"/backup gratis, bukan cuma buat model |
 | **Public storage** | "Best-effort" (praktis tak terbatas) | asal "berguna utk komunitas" (like/download) |
 | **Inference Providers credit** | **$0.10/bulan** (kecil!) | jangan andalkan ini utk beban besar — pakai ZeroGPU Space sbg gantinya |
-| **CPU Space (Docker/Gradio)** | 2vCPU/16GB, 50GB disk, **gratis selamanya** | tidur otomatis kalau nganggur 48 jam, bangun lagi otomatis saat dikunjungi — hosting gratis apa saja yg ringan |
+| **Static Space** | HTML/JS statis, tanpa server | **GRATIS tanpa syarat, tier apa pun** — satu-satunya hosting-Space yg genuinely gratis |
+| **CPU Basic (Docker/Gradio)** | 2vCPU/16GB, 50GB disk | hardware-nya $0/jam, TAPI ⚠️ **membuatnya WAJIB PRO $9/bln** (kebijakan diperketat ~Juli 2026) — bukan gratis lagi |
 | **Static Space** | **gratis tanpa batas kompute** | cocok utk frontend/dashboard statis |
 | **Rate limit API Hub** | Free login 2× lipat drpd anonim | **SELALU pasang `HF_TOKEN`** meski akses publik — alasan #1 orang kena rate-limit |
 | **HuggingChat** | chat gratis 110+ model open-weight | tak ada API resmi gratis-nya — utk otomasi tetap lewat Inference Providers (kena kredit kecil di atas) |
@@ -77,16 +78,18 @@ HF sekarang punya SATU sistem billing kredit terpadu bernama **Inference Provide
 
 ## 5. Spaces (hosting gratis + hack biaya)
 
-| Hardware | Spek | Harga |
-|---|---|---|
-| **Static Space** | — (cuma file statis) | **GRATIS tanpa batas kompute** |
-| **CPU Basic** | 2vCPU/16GB, disk 50GB (ephemeral) | **GRATIS** |
-| CPU Upgrade | 8vCPU/32GB | $0.03/jam |
-| ZeroGPU | dinamis, s/d 96GB VRAM | **GRATIS** (lihat poin 1) |
-| T4 kecil→8×A100 dst | lihat tabel harga resmi | $0.40–$20/jam |
+> ⚠️ **KOREKSI (2026-08-22, ditemukan SETELAH riset awal):** versi awal doc ini keliru bilang "CPU Basic = hosting Docker/Gradio gratis selamanya". **ITU SALAH untuk akun baru sekarang.** Kutipan resmi `docs/hub/spaces-overview` (di-fetch ulang): *"Gradio and Docker Spaces run on compute and **require a paid plan to create: PRO for personal accounts**, Team or Enterprise for organizations. Free personal accounts in good standing can still host up to 2 Gradio Spaces running on **ZeroGPU**."* — kebijakan ini tampaknya baru diperketat sekitar **Juli 2026** (ada thread forum resmi HF soal "New free accounts cannot create CPU Basic Gradio Spaces" & "Docker SDK now marked as Paid"), jadi banyak tutorial/artikel lama (termasuk sumber yg tercampur di riset awal saya) memuat info basi era-lama saat ini masih benar-benar gratis tanpa syarat.
 
-- **CPU Basic gratis = hosting Docker/Gradio APAPUN** (bukan cuma demo ML) selama ringan — cocok utk API kecil, bot, dashboard (mis. dashboard analitik `project_browser_automation` bisa dipindah ke sini drpd Cloud Shell ephemeral yg tiap wake harus di-rebuild). **Space gratis otomatis tidur kalau nganggur ~48 jam, dan otomatis BANGUN LAGI begitu ada pengunjung** — pola persis sama dgn "keepalive ping" yg sudah dipakai utk Cloud Shell (`.50/.60/.61`), cuma di sini gratis-selamanya tanpa risiko VM-recycle kehilangan semua data (karena kode Space tersimpan permanen di git repo Space itu sendiri, bukan disk VM sekali-pakai).
-- **Hardware BERBAYAR justru DEFAULT jalan terus 24 jam (terus dibayar) kecuali kamu set "sleep time" custom** di Space settings — begitu di-set, Space jadi idle/stopped saat nganggur dan TAK dibayar selama tidur, bangun otomatis saat dikunjungi. **Kalau pernah upgrade Space ke hardware berbayar, WAJIB set sleep time, kalau tidak tagihan jalan terus meski tak dipakai.**
+| Jenis Space | Butuh paid plan utk MEMBUAT? | Harga hardware/jam |
+|---|---|---|
+| **Static** (HTML/JS murni, tanpa backend) | **TIDAK — gratis tanpa syarat, tier apa pun** | — (tak ada kompute) |
+| **Gradio di atas ZeroGPU** | Tidak, akun gratis boleh s/d 2 Space | GRATIS (kuota lihat poin 1) |
+| **Gradio atau Docker di CPU Basic/hardware lain** | **YA — wajib PRO ($9/bln) personal, atau Team/Enterprise utk organisasi** | CPU Basic sendiri $0/jam, TAPI gerbang pembuatannya yg dikunci paid |
+| CPU Upgrade / T4 / L4 / A10G / A100 dst | (sama, perlu paid dulu utk bisa bikin Space compute) | $0.03–$20/jam |
+
+- **Implikasi nyata:** kalau mau host layanan sendiri (dashboard, API kecil, bot) via Docker/Gradio Space, **jalan gratis tanpa PRO cuma tersedia lewat SDK Static** — artinya HARUS pure client-side (HTML/CSS/JS statis + `window.huggingface.variables` utk baca variable publik), tanpa proses server/backend berjalan di sisi Space. Kalau butuh backend (nginx proxy, API, bot listener dst), itu genuinely butuh bayar PRO $9/bulan dulu — bukan lagi gratis murni spt anggapan umum lama.
+- **Space gratis (kalau berhasil dibuat, mis. via ZeroGPU-exception atau setelah upgrade PRO) otomatis tidur kalau nganggur ~48 jam, dan BANGUN LAGI otomatis begitu ada pengunjung** — pola mirip "keepalive ping" yg sudah dipakai utk Cloud Shell (`.50/.60/.61`), tanpa risiko VM-recycle kehilangan kode (kode Space permanen di git repo Space itu sendiri).
+- **Hardware BERBAYAR (yg sudah di-upgrade) justru DEFAULT jalan terus 24 jam (terus dibayar) kecuali kamu set "sleep time" custom** di Space settings — begitu di-set, Space jadi idle/stopped saat nganggur dan TAK dibayar selama tidur, bangun otomatis saat dikunjungi. **Kalau pernah upgrade Space ke hardware berbayar, WAJIB set sleep time, kalau tidak tagihan jalan terus meski tak dipakai.**
 - **Tak ada biaya selama fase "build"** (cuma dibayar saat status Starting/Running) — bebas iterasi Dockerfile tanpa nambah tagihan build lamanan.
 - Space yg CRASH otomatis di-suspend & billing berhenti sendiri (tak ada risiko tagihan membengkak akibat crash-loop).
 - **Community GPU Grant:** kalau proyek/demo cukup menarik tapi butuh GPU berbayar, form aplikasi ada di **Space Settings → bagian "sleep time settings" (pojok kiri-bawah)** — "Building something cool as a side project? We also offer community GPU grants" (kutipan resmi halaman pricing). Dinilai kasus-per-kasus, tak ada kriteria pasti dipublikasikan — makin jelas nilai/dampak proyeknya, makin besar peluang.
@@ -125,7 +128,7 @@ Semua kuota dihitung per jendela 5 menit (data resmi, per September 2025):
 2. **Selalu pasang `HF_TOKEN` (akun `warungbudina`) di skrip mana pun yg download dari HF** (kalau ada) — quick-win rate-limit 2× tanpa biaya.
 3. **Ganti kebiasaan `HF_HUB_ENABLE_HF_TRANSFER` (kalau pernah dipakai) ke `HF_XET_HIGH_PERFORMANCE=1`** — env lama sudah tak berefek.
 4. **Pertimbangkan dataset privat HF (gratis 100GB) sbg lapis backup tambahan** utk artefak pipeline (IR JSON, blueprint, dsb dari `viral-pipeline`) — alternatif/pelengkap Gdrive yg sudah dipakai, di luar ekosistem Google (diversifikasi risiko akun/kuota Gdrive yg sudah lumayan padat dgn 3 remote berbeda per memori `project_redmi_vn_node`/`project_viral_analyzer`).
-5. **Dashboard analitik `project_browser_automation`** (sekarang di-host manual via nginx:alpine di Cloud Shell `.60` ephemeral, hilang tiap VM recycle) → kandidat pindah ke **CPU Basic Space gratis-selamanya** (kode di git = permanen, tak hilang saat idle/sleep, auto-bangun saat dikunjungi) — menghapus kebutuhan `selfhost-setup.sh` pasca-recycle.
+5. **Dashboard analitik `project_browser_automation`** (sekarang di-host manual via nginx:alpine di Cloud Shell `.60` ephemeral, hilang tiap VM recycle) — dashboard-nya sendiri sudah berupa **HTML self-contained hasil generate** (bukan app server), jadi kandidat realistis = **Static Space (genuinely gratis, tanpa perlu PRO)**: cron di hub `git push`/`huggingface_hub.upload_file` file HTML baru ke repo Static Space itu tiap regen, auto-rebuild sendiri. Ini MENGGANTIKAN opsi "Docker Space gratis" yg ternyata sudah tak berlaku (lihat koreksi §5) — menghapus kebutuhan `selfhost-setup.sh` pasca-recycle TANPA perlu bayar apa pun, asal dashboard tetap murni statis (tak ada query live/backend).
 
 ---
 
