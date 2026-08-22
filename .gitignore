@@ -8,6 +8,15 @@ mosquitto/config/passwd
 hostinger/
 *hostinger*token*
 claude-hostinger-token*
+# Figma API key (aslinya di ~/.config/figma/, di luar repo - jaring pengaman sama)
+figma/
+*figma*api-key*
+*figma*token*
+# Hugging Face API key (aslinya di ~/.config/huggingface/, di luar repo - jaring pengaman sama)
+huggingface/
+*huggingface*api-key*
+*huggingface*token*
+hf_*
 # FreeRADIUS's own default "snakeoil" TLS certs/keys, extracted from the
 # freeradius/freeradius-server image so the bind-mounted raddb tree is
 # complete (see docker-compose.reference.yml's freeradius volume comment).
