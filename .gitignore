@@ -17,6 +17,10 @@ huggingface/
 *huggingface*api-key*
 *huggingface*token*
 hf_*
+# Supabase secret key (aslinya di ~/.config/supabase/, di luar repo - jaring pengaman sama)
+supabase/
+*supabase*secret-key*
+sb_secret_*
 # FreeRADIUS's own default "snakeoil" TLS certs/keys, extracted from the
 # freeradius/freeradius-server image so the bind-mounted raddb tree is
 # complete (see docker-compose.reference.yml's freeradius volume comment).
