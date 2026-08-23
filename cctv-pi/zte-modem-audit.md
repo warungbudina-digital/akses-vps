@@ -93,6 +93,18 @@ Management & Diagnosis
 
 **Yang SUDAH terkonfirmasi dari form KOSONG (template, bukan live-value) halaman DMZ:** kedua radio `Enable:Ipv4Dmz` (value 1/0) TAK ADA yg `checked` di HTML mentah form-nya — konsisten dgn (tapi TAK 100% membuktikan) DMZ dalam keadaan belum pernah dikonfigurasi/nonaktif. Field `InternalClient` (target IP DMZ) juga kosong.
 
+## ⚠️ Percobaan mitmproxy/ARP-spoofing (2026-08-24) — GAGAL, sudah dibersihkan tuntas
+
+Dicoba 2 pendekatan buat tangkap nilai live via traffic capture, KEDUANYA GAGAL:
+
+**Percobaan #1 — explicit HTTP proxy:** `mitmdump` (diinstal via venv Python di Pi, `python3 -m venv /tmp/mitmenv && pip install mitmproxy`) dijalankan mode proxy biasa di `192.168.60.222:8888`. User set proxy manual di WiFi HP ke alamat itu, browsing ke modem. **Hasil: 0 byte tertangkap** — kemungkinan besar Android (dan OS lain umumnya) tidak mengarahkan traffic ke alamat jaringan lokal/private lewat HTTP proxy manual (dianggap "local traffic", di-bypass otomatis).
+
+**Percobaan #2 — ARP spoofing (transparent MITM):** `arpspoof` (paket `dsniff`) dijalankan KEDUA ARAH (`arpspoof -i wlan0 -t <HP> <modem>` + sebaliknya) + `mitmdump --mode transparent` di port 8081 + iptables `PREROUTING ... REDIRECT --to-port 8081` utk traffic port 80 ke `192.168.60.60` + `FORWARD ACCEPT` utk pasangan IP HP↔modem. **HP teridentifikasi**: `192.168.60.223`, MAC `00:72:0d:3a:2a:72` (SAMA PERSIS dgn device yg pernah connect ke hotspot "WIFI-gratis" — lihat [[project_pi_cctv_audit]] — konfirmasi kuat ini device milik user). Log `arpspoof` KONFIRMASI benar mengirim ARP reply palsu (`arp reply 192.168.60.60 is-at <MAC wlan0 Pi>`), tapi **counter iptables REDIRECT/FORWARD tetap 0 packet** — traffic HP TAK PERNAH benar-benar lewat Pi meski ARP poisoning terkirim. **Kesimpulan: HP (Android modern) kemungkinan besar punya proteksi anti-ARP-spoofing di level OS/kernel** yg menolak update ARP cache mencurigakan.
+
+**✅ Semua DIBERSIHKAN TUNTAS setelah gagal** (diverifikasi, bukan diasumsikan): `pkill arpspoof` + `kill` mitmdump, `iptables -D` utk ke-3 rule (REDIRECT + 2× FORWARD ACCEPT) dihapus, **ARP table dikonfirmasi pulih ke MAC asli** (`192.168.60.60`→`f4:f6:47:a4:ca:48`, `192.168.60.223`→`00:72:0d:3a:2a:72`, dicek via `ip neigh` pasca cleanup). Tak ada state jaringan tersisa dari eksperimen ini.
+
+**Keputusan: dihentikan, TAK dilanjutkan dgn teknik lebih agresif** — 2 pendekatan solid sudah gagal, ROI melanjutkan (mis. downgrade proteksi HP, teknik spoofing lain) tak sepadan utk info yg bisa didapat instan via screenshot manual browser kalau memang dibutuhkan. **Kalau ada sesi depan yg butuh nilai live modem ini: JANGAN ulang mitmproxy/ARP-spoof** (2 metode ini sudah terbukti gagal via jalur normal) — langsung minta user screenshot manual dari HP-nya, jauh lebih cepat.
+
 ## Kesimpulan audit
 - ✅ Postur port terbuka wajar utk ONT (web admin + FTP servis file lokal) — tak ada yg genuinely alarming SELAIN temuan FTP.
 - 🔴 **FTP auth lemah/rusak** (terima kredensial apa pun) — dampak saat ini terbatas krn direktori kosong, tapi tetap direkomendasikan dimatikan kalau tak dipakai.
