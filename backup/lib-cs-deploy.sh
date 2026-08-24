@@ -37,10 +37,18 @@ reachable_cs() {
 # rebutan, boros CPU+network, berpotensi hasil akhir tak terduga kalau
 # keduanya menulis tag sama nyaris berbarengan).
 # Nunggu (BUKAN langsung gagal) sampai lock lain kelar, maks
-# CS_DEPLOY_LOCK_WAIT detik (default 900 = 15mnt, cukup utk build yuni
-# terlama) -- kalau invocation lain lagi jalan, lebih aman antre drpd
-# race; begitu dapat giliran, fast-path healthz di tiap fungsi bikin
-# panggilan ke-2 ini cepat (langsung "sudah sehat, skip").
+# CS_DEPLOY_LOCK_WAIT detik (default 1200 = 20mnt) -- kalau invocation
+# lain lagi jalan, lebih aman antre drpd race; begitu dapat giliran,
+# fast-path healthz di tiap fungsi bikin panggilan ke-2 ini cepat
+# (langsung "sudah sehat, skip").
+# ⚠️ Sebelumnya default 900 (15mnt) -- kejadian nyata 2026-08-24:
+# cs-auto-deploy.sh rebuild yuni fresh-VM (ML: whisper+CLIP, unduh
+# ~139MB) makan ~17mnt (05:05Z-05:22:35Z), sedangkan wake-orchestrator.sh
+# yg antre lock sama nyerah pas 900s (05:22:08Z) -- KALAH 27 DETIK dari
+# saat lock dilepas. Akibatnya deploy yuni SUKSES (via cs-auto-deploy)
+# tapi wake-orchestrator lapor GAGAL & stop-total (strict sequential),
+# balibruntattour+gogobuda tak pernah dicoba. 1200s kasih margin aman
+# di atas rebuild terlama yg pernah terekam.
 _locked_deploy() {
   # ⚠️ WAJIB baris terpisah (bukan `local a=$1 b=$a` dlm 1 command) --
   # semua sisi-kanan di `local a=X b=$a` di-expand DULU sblm assignment
@@ -50,7 +58,7 @@ _locked_deploy() {
   local name="$1"
   local fn="$2"
   local lockfile="/tmp/.cs-deploy-${name}.lock"
-  local wait="${CS_DEPLOY_LOCK_WAIT:-900}"
+  local wait="${CS_DEPLOY_LOCK_WAIT:-1200}"
   local fd
   eval "exec {fd}>\"$lockfile\""
   if ! flock -w "$wait" "$fd"; then
