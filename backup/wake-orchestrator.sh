@@ -92,7 +92,7 @@ open_cs_profile() {
 # sukses -- heuristik string-match di python suka bilang "TAK PASTI"
 # padahal sukses). Ground-truth sebenarnya = reachable_cs di bawah.
 wait_bootstrap_result() {
-  local prof="$1" limit="$2" deadline elapsed line
+  local prof="$1" limit="$2" host="$3" deadline elapsed line
   deadline=$(( $(date +%s) + limit ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
     line="$(timeout 12 ssh ltap-mini "powershell -NoProfile -Command \"Get-Content 'C:\\chrome-cdp\\open-cs.log' -Tail 5 -Encoding Unicode | Select-String 'selesai \\(single-profile'\"" 2>/dev/null | tail -1)"
@@ -103,6 +103,18 @@ wait_bootstrap_result() {
     sleep 8
   done
   log "TIMEOUT ${limit}s menunggu laptop selesai proses profil $prof (cek C:\\chrome-cdp\\open-cs.log manual)."
+  # ⚠️ FALLBACK (ditambah 2026-08-24): polling di atas lewat SSH-ke-laptop,
+  # yang TERBUKTI bisa false-negative -- laptop (CPU AMD E1-2500 lemah)
+  # kadang sesaat tak responsif SSH pas render Chrome+terminal Cloud Shell,
+  # PADAHAL bootstrap-nya sendiri sudah sukses & cepat (log lokal lapor
+  # selesai <2mnt). Sebelum benar2 menyerah, cek LANGSUNG ke VM tujuan
+  # (tak bergantung SSH-ke-laptop yg rawan macet itu) sbg jaring pengaman.
+  log "$prof: fallback -- cek langsung ke VM tujuan (barangkali SSH-ke-laptop yg macet, bukan bootstrap-nya)..."
+  if reachable_cs "$host"; then
+    log "$prof: fallback BERHASIL -- VM tujuan sudah reachable meski polling log laptop gagal/timeout. Anggap selesai."
+    return 0
+  fi
+  log "$prof: fallback juga gagal -- VM tujuan belum reachable. Bootstrap kemungkinan benar2 gagal."
   return 1
 }
 
@@ -131,7 +143,7 @@ process_profile() {
     return 1
   fi
 
-  if ! wait_bootstrap_result "$name" "$bs_limit"; then
+  if ! wait_bootstrap_result "$name" "$bs_limit" "$host"; then
     log "!!! $name GAGAL: laptop tak kunjung selesai proses bootstrap."
     return 1
   fi
