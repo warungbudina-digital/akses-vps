@@ -19,7 +19,19 @@
 # =====================================================================
 
 CS_ADMIN_KEY="${CS_ADMIN_KEY:-$HOME/.ssh/akses-vps-cloudshell-admin}"
-CS_SSHOPTS=(-i "$CS_ADMIN_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new -o BatchMode=yes)
+# ⚠️ StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null (BUKAN accept-new)
+# -- ditemukan 2026-08-24 saat pengujian live: Cloud Shell EPHEMERAL berarti
+# VM di IP yg SAMA (.50/.60/.61) dapat host-key BARU tiap wake. `accept-new`
+# cuma otomatis terima kalau BELUM ada entri sama sekali -- begitu ada entri
+# lama (dari wake sebelumnya) yg beda, ssh MENOLAK KONEKSI TOTAL ("Host key
+# has changed", dikira MITM) tanpa fallback apa pun. Ini bikin reachable_cs()
+# gagal DETERMINISTIK (bukan soal timing/laptop) di wake KEDUA dst untuk
+# profil manapun -- persis pola yg bikin balibruntattour+gogobuda "GAGAL
+# (soft)" di uji coba manual hari ini padahal bootstrap-nya sendiri sukses.
+# Aman dimatikan krn IP ini HANYA reachable via WireGuard mesh privat kita
+# sendiri (bukan internet terbuka) -- pinning host-key tak menambah proteksi
+# nyata di sini, WG tunnel + admin SSH key sudah jadi trust boundary asli.
+CS_SSHOPTS=(-i "$CS_ADMIN_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes)
 
 # reachable_cs <user@ip> -> 0/1, cek SSH cepat (bukan cuma ping, krn WG bisa
 # up tapi sshd di VM belum siap sesaat setelah bootstrap).
