@@ -149,6 +149,22 @@ _deploy_gogobuda_impl() {
   local cred="$HOME/.config/n8n-uploader/credentials.env"
   local oauth="$HOME/.config/n8n-uploader/oauth-client.env"
   local token_src="$HOME/.config/n8n-uploader/token.json"
+  # gfootage (2026-08-24, fix gap): akun Gdrive TEMPAT hasil export Reel RN7
+  # benar2 mendarat, beda dari akun gdrive (gogobuda65 sendiri) yg dipasang
+  # RCLONE_CLIENT_ID/SECRET di atas. Sumbernya rclone.conf HUB SENDIRI (sudah
+  # punya remote [gfootage] sehat, dipakai skrip lain di hub) - ekstrak
+  # stanza-nya (header sampai section berikutnya/EOF), base64, kirim ke
+  # deploy.sh via env (lihat configure_rclone() di mcp-video-editor). OPSIONAL:
+  # kalau file/section tak ada, deploy tetap lanjut, cuma remote [gfootage]
+  # yg absen di gogobuda (bukan blocker deploy keseluruhan).
+  local gfootage_conf="$HOME/.config/rclone/rclone.conf"
+  local gfootage_b64=""
+  if [ -f "$gfootage_conf" ]; then
+    gfootage_b64="$(awk '/^\[gfootage\]/{p=1} /^\[/ && !/^\[gfootage\]/{p=0} p' "$gfootage_conf" | base64 -w0 2>/dev/null || true)"
+  fi
+  if [ -z "$gfootage_b64" ]; then
+    echo ".61 (gogobuda) WARN: remote [gfootage] tak ditemukan di $gfootage_conf - deploy lanjut, tapi workflow n8n yg baca VN-exports akan gagal sampai ini diisi."
+  fi
 
   if ! reachable_cs "$host"; then
     echo ".61 (gogobuda) belum reachable."
@@ -188,6 +204,7 @@ export DB_POSTGRESDB_USER='$DB_POSTGRESDB_USER'
 export DB_POSTGRESDB_PASSWORD='$DB_POSTGRESDB_PASSWORD'
 export RCLONE_CLIENT_ID='$RCLONE_CLIENT_ID'
 export RCLONE_CLIENT_SECRET='$RCLONE_CLIENT_SECRET'
+export GFOOTAGE_RCLONE_STANZA_B64='$gfootage_b64'
 export N8N_ENCRYPTION_KEY='$N8N_ENCRYPTION_KEY'
 export N8N_BASIC_AUTH_USER='$N8N_BASIC_AUTH_USER'
 export N8N_BASIC_AUTH_PASSWORD='$N8N_BASIC_AUTH_PASSWORD'
