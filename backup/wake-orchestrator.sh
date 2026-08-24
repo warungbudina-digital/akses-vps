@@ -96,38 +96,46 @@ open_cs_profile() {
   echo "$out" | grep -qi "SUCCESS"
 }
 
-# wait_bootstrap_result <profil> <batas-detik> -> poll open-cs.log laptop
-# (via powershell tail, UTF-16LE) cari baris "selesai (single-profile
-# <profil>" TERBARU setelah fungsi ini dipanggil. Return 0 kalau ketemu
-# baris exit=0 dlm batas waktu, 1 kalau timeout/gagal/exit!=0.
+# wait_bootstrap_result <profil> <batas-detik> <host> -> poll LANGSUNG ke
+# VM tujuan (reachable_cs, SATU koneksi SSH ke mesin LAIN) sbg sinyal utama
+# "bootstrap selesai" -- BUKAN lagi polling log laptop tiap 8s.
 #
-# CATATAN: ini cuma sinyal "laptop sudah SELESAI mencoba" (bukan jaminan
-# sukses -- heuristik string-match di python suka bilang "TAK PASTI"
-# padahal sukses). Ground-truth sebenarnya = reachable_cs di bawah.
+# ⚠️ Revisi 2026-08-24 (v2): desain lama polling `Get-Content open-cs.log`
+# via SSH-ke-laptop tiap 8s TERBUKTI gagal 5 dari 5 kali hari yg sama --
+# bukan krn bootstrap-nya lambat (log lokal selalu lapor selesai <2mnt),
+# tapi krn TIAP percobaan polling itu sendiri buka koneksi SSH+PowerShell
+# BARU ke laptop yg lemah (AMD E1-2500) sementara laptop itu JUGA lagi
+# sibuk render Chrome+terminal Cloud Shell -- polling-nya sendiri ikut
+# rebutan CPU & keok, bukan soal isi kontennya. Dulu ini "diselamatkan"
+# oleh fallback reachable_cs SETELAH full 240s terbuang percuma; sekarang
+# reachable_cs jadi jalur UTAMA sejak detik pertama (ringan, ke mesin
+# LAIN, tak menambah beban laptop sama sekali) -- deteksi jadi hitungan
+# detik pasca-bootstrap sungguhan selesai, bukan selalu nunggu 240s penuh.
+#
+# Ground-truth TETAP reachable_cs (VM benar2 bisa di-SSH = WG+admin-key
+# beres = bootstrap PASTI sukses, lebih akurat drpd string-match log yg
+# suka salah bilang "TAK PASTI" padahal sukses). Log laptop kini cuma
+# dibaca SEKALI di jalur timeout, murni buat info diagnostik di log HUB.
 wait_bootstrap_result() {
-  local prof="$1" limit="$2" host="$3" deadline elapsed line
+  local prof="$1" limit="$2" host="$3" deadline
   deadline=$(( $(date +%s) + limit ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    line="$(timeout 12 ssh ltap-mini "powershell -NoProfile -Command \"Get-Content 'C:\\chrome-cdp\\open-cs.log' -Tail 5 -Encoding Unicode | Select-String 'selesai \\(single-profile'\"" 2>/dev/null | tail -1)"
-    if echo "$line" | grep -q "single-profile $prof"; then
-      log "laptop lapor selesai: $line"
+    if reachable_cs "$host"; then
+      log "$prof: VM tujuan sudah reachable -> bootstrap dianggap selesai (cek langsung, tak lewat log laptop)."
       return 0
     fi
-    sleep 8
+    sleep 5
   done
-  log "TIMEOUT ${limit}s menunggu laptop selesai proses profil $prof (cek C:\\chrome-cdp\\open-cs.log manual)."
-  # ⚠️ FALLBACK (ditambah 2026-08-24): polling di atas lewat SSH-ke-laptop,
-  # yang TERBUKTI bisa false-negative -- laptop (CPU AMD E1-2500 lemah)
-  # kadang sesaat tak responsif SSH pas render Chrome+terminal Cloud Shell,
-  # PADAHAL bootstrap-nya sendiri sudah sukses & cepat (log lokal lapor
-  # selesai <2mnt). Sebelum benar2 menyerah, cek LANGSUNG ke VM tujuan
-  # (tak bergantung SSH-ke-laptop yg rawan macet itu) sbg jaring pengaman.
-  log "$prof: fallback -- cek langsung ke VM tujuan (barangkali SSH-ke-laptop yg macet, bukan bootstrap-nya)..."
-  if reachable_cs "$host"; then
-    log "$prof: fallback BERHASIL -- VM tujuan sudah reachable meski polling log laptop gagal/timeout. Anggap selesai."
-    return 0
+  log "TIMEOUT ${limit}s menunggu VM tujuan reachable utk profil $prof."
+  # Info diagnostik SAJA (bukan penentu) -- apa kata log lokal laptop,
+  # kalau SSH-ke-laptop sendiri kebetulan lagi bisa dijangkau.
+  local line
+  line="$(timeout 12 ssh ltap-mini "powershell -NoProfile -Command \"Get-Content 'C:\\chrome-cdp\\open-cs.log' -Tail 5 -Encoding Unicode | Select-String 'selesai \\(single-profile'\"" 2>/dev/null | tail -1)"
+  if [ -n "$line" ]; then
+    log "$prof: (info) log laptop lapor: $line"
+  else
+    log "$prof: (info) log laptop juga tak terbaca (SSH-ke-laptop mungkin macet, atau bootstrap belum sempat tulis apa pun)."
   fi
-  log "$prof: fallback juga gagal -- VM tujuan belum reachable. Bootstrap kemungkinan benar2 gagal."
   return 1
 }
 
@@ -164,6 +172,10 @@ process_profile() {
     return 2
   fi
 
+  # ⚠️ Sejak revisi 2026-08-24 v2, wait_bootstrap_result() di atas SUDAH
+  # memverifikasi reachable_cs -- cek berikut ini biasanya langsung sukses
+  # di percobaan pertama (instan). Tetap dipertahankan sbg lapis kedua yg
+  # jujur (bukan asumsi) & tempat log "cek reachability" yg jelas di HUB.
   log "$name: cek reachability node (maks ${reach_limit}s, sshd VM butuh sesaat pasca-bootstrap)..."
   if ! wait_wg_reachable "$host" "$reach_limit"; then
     log "!!! $name GAGAL (soft, laptop sudah beres): node tak reachable via SSH dlm ${reach_limit}s pasca-bootstrap (WG/sshd VM belum siap)."
