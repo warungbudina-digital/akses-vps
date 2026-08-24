@@ -97,39 +97,72 @@ gogobuda — urutan ini TETAP, tak berubah):
         │
         ▼
 7a. SEHAT → lanjut ke profil berikutnya (ulang dari langkah 1)     ATAU
-7b. GAGAL di tahap manapun (2-6) → BERHENTI TOTAL, profil
-    berikutnya TIDAK DICOBA. Kirim notifikasi Telegram. Selesai.
+7b. GAGAL di tahap 2-3 (trigger/bootstrap, laptop BELUM beres
+    bagiannya) → HARD-FAIL, BERHENTI TOTAL. Profil berikutnya
+    TIDAK DICOBA. Kirim notifikasi Telegram. Selesai.        ATAU
+7c. GAGAL di tahap 5-6 (reachable/deploy, laptop SUDAH beres
+    bagiannya) → SOFT-FAIL, LANJUT ke profil berikutnya (ulang
+    dari langkah 1). Profil ini dicatat gagal di ringkasan akhir,
+    tapi tak menghalangi yang lain.
 ```
 
-**Kenapa "berhenti total" dan bukan "lewati saja"?** Keputusan sadar
-(2026-08-16): kalau satu profil sudah bermasalah, kemungkinan besar
-akar masalahnya di laptop/jaringan secara umum (bukan spesifik satu
-profil) — memaksa lanjut cuma bikin kegagalan beruntun yang
-membingungkan dibaca. Lebih baik berhenti, kasih tahu, biar dicek
-manual dulu apa yang salah.
+**⚠️ Revisi 2026-08-24 (v3): "berhenti total" kini BERSYARAT, bukan
+mutlak lagi.** Keputusan asli 2026-08-16 ("satu gagal, semua
+berhenti") didasari asumsi kalau satu profil bermasalah, kemungkinan
+besar akar masalahnya di laptop/jaringan secara umum — memaksa lanjut
+cuma menambah beban ke laptop yang sedang kewalahan. Tapi kejadian
+nyata 24 Agustus membuktikan tak semua kegagalan seperti itu: `yuni`
+sukses penuh di sisi laptop (tab terbuka, bootstrap tuntas), tapi
+`deploy_yuni` kalah race lock 27 detik lawan cron `cs-auto-deploy.sh`
+— gagalnya murni di sisi cloud, laptop sama sekali tak terlibat/tak
+kewalahan. Dulu ini tetap memblokir `balibruntattour`+`gogobuda` total,
+padahal tak ada alasan teknis untuk itu.
+
+**Fix:** kebijakan sekarang dipecah berdasar TAHAP kegagalan (lihat
+komentar `wake-orchestrator.sh`, fungsi `process_profile()`):
+- **HARD-FAIL** (tahap 2-3, trigger task ATAU laptop tak kunjung lapor
+  bootstrap selesai) = laptop sendiri yang bermasalah → berhenti total,
+  perilaku SAMA seperti sebelumnya.
+- **SOFT-FAIL** (tahap 5-6, node tak reachable ATAU deploy tak sehat) =
+  laptop sudah tuntas bagiannya, masalah di cloud → lanjut ke profil
+  berikutnya, TIDAK berhenti.
 
 ### Kalau semua sukses
 Log `~/wake-orchestrator.log` (di HUB) berakhir dengan baris:
 ```
-=== SEMUA 3 PROFIL TUNTAS SEHAT (yuni=OK, balibruntattour=OK, gogobuda=OK) ===
+=== RINGKASAN AKHIR: yuni=OK, balibruntattour=OK, gogobuda=OK ===
 ```
 + notifikasi Telegram "✅ wake-orchestrator SUKSES PENUH".
 
-### Kalau berhenti di tengah
-Log akan berhenti tepat setelah baris `!!! <profil> GAGAL: <alasan>`.
-Baca alasannya — biasanya salah satu dari:
-- **"trigger task tak sukses"** → laptop tak terjangkau SSH sama sekali
-  (mungkin belum wake/masih boot) atau task `open-cs-<profil>` hilang
-  dari Task Scheduler (cek ulang §7 kalau ini terjadi).
-- **"laptop tak kunjung selesai proses bootstrap"** → tab Cloud Shell
-  gagal dibuka/prompt tak muncul dlm 180s, ATAU laptop sedang sangat
-  lambat. Cek `C:\chrome-cdp\open-cs.log` langsung.
-- **"node tak reachable via SSH"** → bootstrap laptop kelar tapi
-  WireGuard/sshd VM Cloud Shell belum naik. Bisa VM gagal provision,
-  atau kredensial WG-nya bermasalah.
-- **"deploy tak sehat"** → node reachable tapi project-nya gagal
-  build/start. Cek detail di baris sebelumnya (biasanya ada pesan
-  spesifik dari `bring-up-*.sh` atau `docker logs`).
+### Kalau tak semua sukses
+Log SELALU berakhir dengan baris `=== RINGKASAN AKHIR: yuni=<status>,
+balibruntattour=<status>, gogobuda=<status> ===` — baris ini SATU-
+SATUNYA sumber kebenaran yang dibaca `check-wake-pipeline.sh` (jangan
+lagi menyimpulkan dari pola baris `!!! X GAGAL`, sejak v3 bisa ada
+lebih dari satu per run). Tiap profil berstatus salah satu dari:
+`OK` / `GAGAL (hard, bootstrap laptop)` / `GAGAL (soft, pasca-
+bootstrap)` / `BELUM DICOBA` (cuma muncul kalau ada hard-fail SEBELUM
+profil ini sempat dicoba).
+
+Baca alasan gagal spesifik di baris `!!! <profil> GAGAL (hard/soft):
+<alasan>` di badan log — biasanya salah satu dari:
+- **"trigger task tak sukses"** *(hard)* → laptop tak terjangkau SSH
+  sama sekali (mungkin belum wake/masih boot) atau task
+  `open-cs-<profil>` hilang dari Task Scheduler (cek ulang §7 kalau
+  ini terjadi).
+- **"laptop tak kunjung selesai proses bootstrap"** *(hard)* → tab
+  Cloud Shell gagal dibuka/prompt tak muncul dlm batas waktu, ATAU
+  laptop sedang sangat lambat. Cek `C:\chrome-cdp\open-cs.log`
+  langsung.
+- **"node tak reachable via SSH"** *(soft)* → bootstrap laptop kelar
+  tapi WireGuard/sshd VM Cloud Shell belum naik. Bisa VM gagal
+  provision, atau kredensial WG-nya bermasalah.
+- **"deploy tak sehat"** *(soft)* → node reachable tapi project-nya
+  gagal build/start, ATAU (kejadian nyata 24 Agustus) kalah race lock
+  lawan `cs-auto-deploy.sh` — cek `CS_DEPLOY_LOCK_WAIT` di
+  `lib-cs-deploy.sh` (default 1200s) kalau ini polanya berulang. Cek
+  detail di baris sebelumnya (biasanya ada pesan spesifik dari
+  `bring-up-*.sh` atau `docker logs`).
 
 ## 4. Jaring pengaman siang hari (`cs-auto-deploy.sh`)
 
@@ -257,3 +290,11 @@ dokumen ini. Cuma utk darurat/testing.)
   diterima: build project (terutama analyzer yuni) berpotensi 2×/hari
   krn Cloud Shell ephemeral (tiap wake = VM baru, tak ada cache
   persisten lintas siklus).
+- **2026-08-24 (v3)**: kebijakan "berhenti total kalau satu gagal"
+  direvisi jadi bersyarat (HARD-FAIL tetap berhenti total, SOFT-FAIL
+  lanjut ke profil berikutnya) — lihat §3. Dipicu insiden nyata: `yuni`
+  kalah race lock 27 detik lawan `cs-auto-deploy.sh` (`lib-cs-deploy.sh`
+  `CS_DEPLOY_LOCK_WAIT` 900→1200s sekaligus dinaikkan), yang dulu ikut
+  memblokir `balibruntattour`+`gogobuda` padahal laptop sama sekali tak
+  bermasalah. `check-wake-pipeline.sh` ikut diupdate baca baris
+  `=== RINGKASAN AKHIR: ... ===` sbg satu-satunya sumber kebenaran.
