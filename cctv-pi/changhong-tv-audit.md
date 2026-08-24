@@ -55,7 +55,16 @@ Field `has_update:false` di DIAL `/setup/eureka_info` **MENYESATKAN** — itu cu
 - Status awal: "Waiting to download" dgn tombol "Download".
 - **✅ 2026-08-24: Download DIPICU via ADB** (`input tap` pada tombol Download, koordinat diverifikasi presisi dari screenshot 1280x720 asli — resolusi PNG = resolusi fisik, tak ada scaling) → status berubah jadi **"Downloading"**, tombol jadi "Pause" — proses terkonfirmasi berjalan (screenshot before/after tersimpan).
 - **PENTING**: TV harus tetap menyala + tersambung listrik sampai proses selesai (download → instal → reboot otomatis). JANGAN dimatikan di tengah proses (peringatan eksplisit di layar: "may not restart" kalau listrik terputus).
-- **Progres terpantau (2026-08-24)**: Download 1.02GB → **selesai 100% dlm hitungan menit** (kemungkinan cache lokal ISP/CDN cepat) → status lanjut ke **"Verifying"** (cek integritas paket). Tahap berikutnya normalnya "Installing" lalu **reboot otomatis**. **Catatan teknis**: `adb shell screencap` sempat HANG/timeout beberapa kali persis saat proses download/verify berat — TV kemungkinan throttle I/O buat proses lain saat OTA jalan, bukan tanda ADB terputus (`adb devices`/`shell echo` tetap responsif normal di saat sama). Kalau perlu screenshot progress OTA sesi depan, kasih timeout lebih longgar (15-20 detik) drpd curiga koneksi putus.
+- **Progres terpantau (2026-08-24)**: Download 1.02GB → **selesai 100% dlm hitungan menit** (kemungkinan cache lokal ISP/CDN cepat) → "Verifying" → "Installing... Step 1 of 2" → TV **reboot total** (unreachable ping beberapa menit) → **✅ BERHASIL SEMPURNA**, TV online kembali dgn Android 14. **Catatan teknis**: `adb shell screencap` sempat HANG/timeout beberapa kali persis saat proses download/verify berat — TV kemungkinan throttle I/O buat proses lain saat OTA jalan, bukan tanda ADB terputus (`adb devices`/`shell echo` tetap responsif normal di saat sama). Kalau perlu screenshot progress OTA sesi depan, kasih timeout lebih longgar (15-20 detik) drpd curiga koneksi putus.
+
+### ✅ HASIL AKHIR UPGRADE (dikonfirmasi pasca-reboot)
+| | Sebelum | Sesudah |
+|---|---|---|
+| Android | 11 (R) | **14 (U)** |
+| Security patch | 2025-06-01 (~14 bulan stale) | **2026-06-01** (~2.5 bulan) |
+| Build | `RTMA.250416.071` (2025-06-11) | `UKNV.260514.001` (2026-05-14) |
+
+**ADB reconnect pasca-reboot: LANGSUNG status `device` tanpa perlu approve popup ulang** — konfirmasi kuat sertifikat otorisasi ADB ("Always allow from this computer") **persisten melewati reboot + OTA major version** (tersimpan di partition yg tak ikut ter-wipe). Ini berarti akses ADB dari Pi ke TV ini sekarang genuinely permanen selama toggle USB debugging tak dimatikan manual dan cert tak dihapus manual dari sisi TV.
 
 ## Kesimpulan audit
 - ✅ Postur jaringan default bersih (tak ada admin-web/telnet/ADB terbuka tanpa campur tangan user).
