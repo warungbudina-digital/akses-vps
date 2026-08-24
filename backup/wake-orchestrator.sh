@@ -10,12 +10,25 @@
 # tak lagi kewalahan buka 3 tab Cloud Shell berat sekaligus (akar
 # masalah kegagalan berulang sebelumnya).
 #
-# KEBIJAKAN GAGAL = STRICT SEQUENTIAL (bukan best-effort): begitu SATU
-# profil gagal di tahap manapun (bootstrap tak siap / tak reachable /
-# deploy tak sehat dlm batas waktu), skrip BERHENTI TOTAL saat itu juga.
-# Profil berikutnya TIDAK dicoba. Alasan: kalau satu tahap sudah
-# bermasalah, kemungkinan besar laptop/jaringan sedang tak stabil --
-# memaksa lanjut cuma menambah kegagalan beruntun & log yang membingungkan.
+# KEBIJAKAN GAGAL (direvisi 2026-08-24) = SEQUENTIAL + BERHENTI BERSYARAT,
+# dibedakan berdasar TAHAP kegagalan -- bukan lagi "sekali gagal, semua
+# berhenti" polos:
+#   - HARD-FAIL (trigger task open-cs-<profil> gagal / laptop tak kunjung
+#     lapor selesai bootstrap dlm batas waktu): profil berikutnya TIDAK
+#     dicoba, skrip berhenti total. Alasan: kegagalan di tahap INI berarti
+#     laptop (CPU lemah) sendiri sedang bermasalah/kewalahan -- menambah
+#     beban buka tab lagi cuma bikin kegagalan beruntun.
+#   - SOFT-FAIL (bootstrap laptop SUDAH selesai/sukses, tapi node Cloud
+#     Shell tak kunjung reachable ATAU deploy_<profil> gagal/tak sehat):
+#     profil berikutnya TETAP DICOBA. Alasan: di tahap ini laptop sudah
+#     tuntas bagiannya (tab sudah terbuka & idle) -- kegagalannya murni
+#     di sisi cloud (VM/deploy), tak ada risiko tambahan beban ke laptop
+#     kalau lanjut buka tab profil berikutnya.
+# Kejadian nyata yg memicu revisi ini (2026-08-24): yuni SUKSES bootstrap
+# di laptop, tapi deploy-nya kalah race lock 27 detik lawan cron
+# cs-auto-deploy.sh (lihat lib-cs-deploy.sh) -> dulu ini bikin
+# balibruntattour+gogobuda ikut TAK PERNAH dicoba padahal tak ada
+# hubungannya sama sekali dgn kondisi laptop.
 #
 # TIAP PROFIL cuma dianggap SELESAI kalau tahap deploy-nya SEHAT PENUH
 # (healthz/health returns true, BUKAN cuma "container ada") -- fungsi
@@ -131,26 +144,29 @@ wait_wg_reachable() {
 }
 
 # process_profile <nama> <host-ssh> <fungsi-deploy> <batas-bootstrap> <batas-reachable>
-# Return 0 = profil ini TUNTAS SEHAT. 1 = gagal di tahap manapun (pemanggil
-# yg putuskan berhenti total sesuai kebijakan strict-sequential).
+# Return 0 = profil ini TUNTAS SEHAT.
+#        1 = SOFT-FAIL (gagal di tahap reachable/deploy -- laptop SUDAH
+#            beres bagiannya; pemanggil aman lanjut ke profil berikutnya).
+#        2 = HARD-FAIL (gagal di tahap trigger/bootstrap -- laptop sendiri
+#            lagi bermasalah; pemanggil WAJIB berhenti total).
 process_profile() {
   local name="$1" host="$2" deploy_fn="$3" bs_limit="$4" reach_limit="$5"
 
   log "=== PROFIL $name: mulai ==="
 
   if ! open_cs_profile "$name"; then
-    log "!!! $name GAGAL: trigger task open-cs-$name tak sukses."
-    return 1
+    log "!!! $name GAGAL (hard): trigger task open-cs-$name tak sukses."
+    return 2
   fi
 
   if ! wait_bootstrap_result "$name" "$bs_limit" "$host"; then
-    log "!!! $name GAGAL: laptop tak kunjung selesai proses bootstrap."
-    return 1
+    log "!!! $name GAGAL (hard): laptop tak kunjung selesai proses bootstrap."
+    return 2
   fi
 
   log "$name: cek reachability node (maks ${reach_limit}s, sshd VM butuh sesaat pasca-bootstrap)..."
   if ! wait_wg_reachable "$host" "$reach_limit"; then
-    log "!!! $name GAGAL: node tak reachable via SSH dlm ${reach_limit}s pasca-bootstrap (WG/sshd VM belum siap)."
+    log "!!! $name GAGAL (soft, laptop sudah beres): node tak reachable via SSH dlm ${reach_limit}s pasca-bootstrap (WG/sshd VM belum siap)."
     return 1
   fi
   log "$name: node reachable. Lanjut deploy (menunggu SEHAT PENUH, bisa beberapa menit)..."
@@ -160,7 +176,7 @@ process_profile() {
   echo "$deploy_out" | sed "s/^/[wake-orch:$name] /" | tee -a "$LOG" >/dev/null
 
   if [ "$deploy_rc" -ne 0 ]; then
-    log "!!! $name GAGAL: deploy tak sehat (lihat detail di atas)."
+    log "!!! $name GAGAL (soft, laptop sudah beres): deploy tak sehat (lihat detail di atas)."
     return 1
   fi
 
@@ -169,42 +185,67 @@ process_profile() {
 }
 
 # ---------------------------------------------------------------------
-# ALUR UTAMA — strict sequential, berhenti total di kegagalan pertama.
-# Batas waktu per tahap: bootstrap generous (laptop lemah + Cloud Shell
-# VM cold-start bisa 3-4mnt), reachable pendek (begitu WG up biasanya
-# sshd VM langsung siap), deploy TANPA batas eksternal tambahan di sini
-# (fungsi deploy_* sendiri sudah punya batas internal -- analyzer V2
-# bisa ~15mnt kalau image belum ada, browser ~6mnt, n8n ~90dtk).
+# ALUR UTAMA — sequential, berhenti total HANYA kalau hard-fail (lihat
+# kebijakan di header file). Batas waktu per tahap: bootstrap generous
+# (laptop lemah + Cloud Shell VM cold-start bisa 3-4mnt), reachable
+# pendek (begitu WG up biasanya sshd VM langsung siap), deploy TANPA
+# batas eksternal tambahan di sini (fungsi deploy_* sendiri sudah punya
+# batas internal -- analyzer V2 bisa ~15mnt kalau image belum ada,
+# browser ~6mnt, n8n ~90dtk).
+#
+# finish() SELALU dipanggil sebelum exit (jalur sukses PENUH, soft-fail,
+# maupun hard-fail-abort) -- satu baris "=== RINGKASAN AKHIR" jadi
+# SATU-SATUNYA anchor yg dibaca check-wake-pipeline.sh, supaya laporan
+# Telegram tak perlu nebak-nebak dari pola baris "!!! X GAGAL" yg kini
+# bisa muncul lebih dari sekali per run (beda dari desain lama).
 # ---------------------------------------------------------------------
 STATUS_YUNI="BELUM DICOBA"; STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"
 
-if process_profile "yuni" "warungbudina@10.66.66.50" deploy_yuni 240 60; then
+finish() {
+  log "=== RINGKASAN AKHIR: yuni=$STATUS_YUNI, balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO ==="
+  if [ "$STATUS_YUNI" = "OK" ] && [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ]; then
+    notify "✅ wake-orchestrator SUKSES PENUH: yuni+balibruntattour+gogobuda semua sehat & jalan."
+    exit 0
+  fi
+  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- yuni=$STATUS_YUNI, balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO. Detail: ~/wake-orchestrator.log (hub)."
+  exit 1
+}
+
+process_profile "yuni" "warungbudina@10.66.66.50" deploy_yuni 240 60
+rc=$?
+if [ "$rc" -eq 0 ]; then
   STATUS_YUNI="OK"
+elif [ "$rc" -eq 2 ]; then
+  STATUS_YUNI="GAGAL (hard, bootstrap laptop)"
+  log "BERHENTI TOTAL -- yuni hard-fail (bootstrap laptop bermasalah), balibruntattour & gogobuda TIDAK dicoba."
+  finish
 else
-  STATUS_YUNI="GAGAL"
-  log "BERHENTI TOTAL (strict sequential) -- yuni gagal, balibruntattour & gogobuda TIDAK dicoba."
-  notify "⚠️ wake-orchestrator BERHENTI di yuni (.50). balibruntattour & gogobuda tak dicoba. Detail: ~/wake-orchestrator.log (hub)."
-  exit 1
+  STATUS_YUNI="GAGAL (soft, pasca-bootstrap)"
+  log "yuni soft-fail (laptop sudah beres bagiannya) -- LANJUT ke balibruntattour."
 fi
 
-if process_profile "balibruntattour" "balibruntattour@10.66.66.60" deploy_balibruntattour 240 60; then
+process_profile "balibruntattour" "balibruntattour@10.66.66.60" deploy_balibruntattour 240 60
+rc=$?
+if [ "$rc" -eq 0 ]; then
   STATUS_BALI="OK"
+elif [ "$rc" -eq 2 ]; then
+  STATUS_BALI="GAGAL (hard, bootstrap laptop)"
+  log "BERHENTI TOTAL -- balibruntattour hard-fail (bootstrap laptop bermasalah), gogobuda TIDAK dicoba."
+  finish
 else
-  STATUS_BALI="GAGAL"
-  log "BERHENTI TOTAL (strict sequential) -- balibruntattour gagal, gogobuda TIDAK dicoba."
-  notify "⚠️ wake-orchestrator: yuni OK, BERHENTI di balibruntattour (.60). gogobuda tak dicoba. Detail: ~/wake-orchestrator.log (hub)."
-  exit 1
+  STATUS_BALI="GAGAL (soft, pasca-bootstrap)"
+  log "balibruntattour soft-fail (laptop sudah beres bagiannya) -- LANJUT ke gogobuda."
 fi
 
-if process_profile "gogobuda" "gogobuda65@10.66.66.61" deploy_gogobuda 240 60; then
+process_profile "gogobuda" "gogobuda65@10.66.66.61" deploy_gogobuda 240 60
+rc=$?
+if [ "$rc" -eq 0 ]; then
   STATUS_GOGO="OK"
+elif [ "$rc" -eq 2 ]; then
+  STATUS_GOGO="GAGAL (hard, bootstrap laptop)"
 else
-  STATUS_GOGO="GAGAL"
-  log "BERHENTI (gogobuda gagal, tapi ini profil TERAKHIR -- tak ada lagi yg menyusul)."
-  notify "⚠️ wake-orchestrator: yuni+balibruntattour OK, gogobuda GAGAL. Detail: ~/wake-orchestrator.log (hub)."
-  exit 1
+  STATUS_GOGO="GAGAL (soft, pasca-bootstrap)"
 fi
+log "gogobuda ini profil TERAKHIR -- tak ada lagi yg menyusul."
 
-log "=== SEMUA 3 PROFIL TUNTAS SEHAT (yuni=$STATUS_YUNI, balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO) ==="
-notify "✅ wake-orchestrator SUKSES PENUH: yuni+balibruntattour+gogobuda semua sehat & jalan."
-exit 0
+finish

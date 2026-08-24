@@ -58,7 +58,16 @@ Detail: $OUT (di akses-vps)"
   exit 0
 fi
 
-if echo "$BLOCK" | grep -q "SEMUA 3 PROFIL TUNTAS SEHAT"; then
+# v3 (2026-08-24): wake-orchestrator.sh tak lagi strict-sequential murni
+# (soft-fail kini lanjut ke profil berikutnya, lihat wake-orchestrator.sh
+# header) -- jadi bisa ada LEBIH dari satu "!!! X GAGAL" per run, dan pola
+# lama (deteksi STOPPED_AT dari baris gagal terakhir) sudah tak akurat.
+# Sumber kebenaran sekarang = baris "=== RINGKASAN AKHIR: ..." yg SELALU
+# ditulis wake-orchestrator.sh di ujung tiap run (sukses penuh, soft-fail,
+# ATAU hard-fail-abort) -- satu anchor tunggal, tak perlu nebak lagi.
+RINGKASAN="$(echo "$BLOCK" | grep "=== RINGKASAN AKHIR:" | tail -1)"
+
+if echo "$BLOCK" | grep -q "SEMUA 3 PROFIL TUNTAS SEHAT\|=== RINGKASAN AKHIR: yuni=OK, balibruntattour=OK, gogobuda=OK"; then
   MSG="✅ check-wake-pipeline (run ${RUN_TS:-?} UTC): SUKSES PENUH -- yuni+balibruntattour+gogobuda semua sehat."
   log "$MSG"
   "$TG" "$MSG" || log "WARN: kirim Telegram gagal."
@@ -66,18 +75,32 @@ if echo "$BLOCK" | grep -q "SEMUA 3 PROFIL TUNTAS SEHAT"; then
   exit 0
 fi
 
-# Belum ada baris akhir (SEMUA TUNTAS / gagal jelas) -> deteksi berhenti di profil mana
+if [ -n "$RINGKASAN" ]; then
+  # Run TUNTAS (baik ada hard-fail-abort maupun soft-fail lanjut-terus)
+  # tapi TAK semua sehat -- tampilkan ringkasan per-profil apa adanya.
+  MSG="⚠️ check-wake-pipeline (run ${RUN_TS:-?} UTC): TUNTAS tapi TAK SEMUA SEHAT.
+$RINGKASAN
+3 baris terakhir log:
+$(echo "$BLOCK" | grep "^\[wake-orch" | tail -3)
+Detail lengkap: $OUT (di akses-vps) / $WLOG"
+  log "$MSG"
+  "$TG" "$MSG" || log "WARN: kirim Telegram gagal."
+  log "=== selesai ==="
+  exit 0
+fi
+
+# Tak ada baris RINGKASAN AKHIR sama sekali -> run kemungkinan MASIH
+# berjalan saat log ini dibaca (build ML bisa 15mnt+), atau macet total
+# sebelum sempat tulis ringkasan (mis. skrip crash tak terduga).
 STOPPED_AT="?"
-if echo "$BLOCK" | grep -q "!!! gogobuda GAGAL"; then STOPPED_AT="gogobuda (profil ke-3, terakhir)"
-elif echo "$BLOCK" | grep -q "!!! balibruntattour GAGAL"; then STOPPED_AT="balibruntattour (profil ke-2) -- gogobuda TAK dicoba"
-elif echo "$BLOCK" | grep -q "!!! yuni GAGAL"; then STOPPED_AT="yuni (profil ke-1) -- balibruntattour & gogobuda TAK dicoba"
-elif echo "$BLOCK" | grep -q "=== PROFIL"; then STOPPED_AT="masih berjalan saat log ini dibaca (belum ada baris akhir) -- run mungkin masih lama (build ML bisa 15mnt), atau macet"
+if echo "$BLOCK" | grep -q "=== PROFIL"; then
+  STOPPED_AT="masih berjalan saat log ini dibaca (belum ada baris ringkasan) -- run mungkin masih lama (build ML bisa 15mnt), atau macet total tak terduga"
 fi
 
 LAST_REASON="$(echo "$BLOCK" | grep "^\[wake-orch" | tail -3)"
 
-MSG="⚠️ check-wake-pipeline (run ${RUN_TS:-?} UTC): BERHENTI/BELUM TUNTAS.
-Berhenti di: $STOPPED_AT
+MSG="⚠️ check-wake-pipeline (run ${RUN_TS:-?} UTC): BERHENTI/BELUM TUNTAS (tak ada baris ringkasan akhir).
+Status: $STOPPED_AT
 3 baris terakhir log:
 $LAST_REASON
 Detail lengkap: $OUT (di akses-vps) / $WLOG"
