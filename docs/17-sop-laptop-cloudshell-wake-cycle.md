@@ -79,12 +79,17 @@ gogobuda — urutan ini TETAP, tak berubah):
    Ini HANYA menyalakan akses (WG+SSH) — BUKAN deploy project.
         │
         ▼
-4. HUB polling: apakah laptop sudah lapor "selesai" utk profil ini?
-   (baca C:\chrome-cdp\open-cs.log via SSH, maks 240 detik)
+4. HUB polling LANGSUNG ke VM Cloud Shell tujuan (SSH ringan tiap 5
+   detik, maks 240 detik) — **bukan lagi** baca `C:\chrome-cdp\open-cs.log`
+   laptop via SSH (v2, direvisi 2026-08-24: polling-ke-laptop TERBUKTI
+   ikut rebutan CPU dgn laptop yg lagi sibuk Chrome+CDP, jadi 5/5 gagal
+   sebelum akhirnya fallback — sekarang cek VM langsung dari awal, jauh
+   lebih cepat & tak membebani laptop). Kalau timeout, log laptop tetap
+   dibaca SEKALI sbg info diagnostik saja (bukan penentu).
         │
         ▼
-5. HUB polling: apakah node Cloud Shell ini SUDAH BISA di-SSH langsung?
-   (bukan cuma ping WireGuard — sshd di VM butuh beberapa detik lagi)
+5. HUB verifikasi SEKALI LAGI node ini SUDAH BISA di-SSH langsung
+   (biasanya instan krn langkah 4 di atas sudah memastikannya)
         │
         ▼
 6. HUB jalankan fungsi deploy_<profil> (dari lib-cs-deploy.sh):
@@ -298,3 +303,16 @@ dokumen ini. Cuma utk darurat/testing.)
   memblokir `balibruntattour`+`gogobuda` padahal laptop sama sekali tak
   bermasalah. `check-wake-pipeline.sh` ikut diupdate baca baris
   `=== RINGKASAN AKHIR: ... ===` sbg satu-satunya sumber kebenaran.
+- **2026-08-24 (v4, sesi sama)**: pengujian live end-to-end (dipicu
+  manual, bukan nunggu jadwal) menemukan dua bug LAGI: (1) `reachable_cs`
+  pakai `StrictHostKeyChecking=accept-new` yg gagal DETERMINISTIK begitu
+  IP VM ephemeral (.50/.60/.61) dapat host-key baru dari wake sebelumnya
+  — diganti `StrictHostKeyChecking=no` (aman, IP ini cuma reachable via
+  WireGuard privat kita sendiri). (2) `wait_bootstrap_result()` yg
+  polling `open-cs.log` laptop tiap 8s TERBUKTI gagal 5/5 percobaan hari
+  itu — laptop lemah ikut kewalahan oleh polling-nya SENDIRI (spawn SSH+
+  PowerShell baru tiap 8 detik) di saat bersamaan sedang sibuk Chrome+CDP,
+  bukan soal isi log. Diganti: cek `reachable_cs` LANGSUNG ke VM tujuan
+  jadi sinyal utama (§3 langkah 4), polling log laptop turun jadi info
+  diagnostik saja. Kedua fix TERBUKTI via `ssh -v` (host-key) & data
+  timestamp log lokal vs log HUB (polling) sebelum diterapkan.
