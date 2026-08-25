@@ -104,6 +104,29 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
 
+  cloudflared-n8n:
+    # (2026-08-25) Tunnel TERPISAH dari cloudflared di atas -- khusus
+    # n8n.obc-crypto.com, proxy LANGSUNG ke n8n-uploader di VM Cloud Shell
+    # gogobuda (10.66.66.61:5678 via WireGuard), BUKAN lewat nginx (beda host,
+    # bukan container lokal di stack ini). Ingress rule dikonfigurasi lewat
+    # Cloudflare API (tunnel id 9505b522-..., nama tunnel "n8n" -- reuse
+    # tunnel lama yg sempat dibuat 6 Juni 2026, ingress-nya diupdate dari
+    # target basi "n8n-n8n-1:5678" ke IP WG yg benar). Auth publik ditangani
+    # n8n sendiri (N8N_BASIC_AUTH_ACTIVE=true), bukan di layer tunnel ini.
+    # network_mode host TIDAK dipakai -- default bridge cukup, container bisa
+    # reach 10.66.66.61 lewat NAT egress host (terverifikasi live 25/8).
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    mem_limit: 64m
+    cpus: 0.2
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARE_N8N_TUNNEL_TOKEN}"
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
   # -------------------- Application --------------------
   grpc-server:
     build: ./grpc-server
