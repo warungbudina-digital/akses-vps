@@ -184,7 +184,11 @@ _deploy_gogobuda_impl() {
     token_b64="$(base64 -w0 "$token_src" 2>/dev/null || base64 "$token_src" | tr -d '\n')"
   fi
 
-  if ! ssh "${CS_SSHOPTS[@]}" "$host" bash -s <<REMOTE_EOF
+  # (2026-08-25 fix: kondisi ini SEMPAT terbalik -- `!` bikin cabang "GAGAL"
+  # kepicu justru saat ssh SUKSES exit 0, dan sebaliknya lolos ke healthz-loop
+  # di bawah justru saat GAGAL. Terbukti reproducible: cs-auto-deploy re-run
+  # idempoten [Container n8n Running] TETAP lapor "GAGAL" krn bug ini.)
+  if ssh "${CS_SSHOPTS[@]}" "$host" bash -s <<REMOTE_EOF
 set -euo pipefail
 cd ~
 if [ -d mcp-video-editor/.git ]; then
