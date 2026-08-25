@@ -65,6 +65,30 @@ diotomasi penuh):
   ringan) yang dipanggil n8n via node "HTTP Request" ke `10.66.66.1:<port>`
   — hindari SSH sama sekali dari sisi n8n, lebih simpel utk node non-teknis.
 
+### `--post-detail` — data lebih dalam per-postingan
+
+```bash
+python3 fb_analyze.py --account "Go Go Bud" --post-detail --post-detail-count 2
+```
+
+Klik masuk ke halaman "Insight Postingan" tiap post (bukan cuma baris ringkasan
+tabel Galeri Konten), dapat data yang TIDAK ada di tabel biasa:
+
+- `shares` (Frekuensi Dibagikan) — jawaban utk "Shares-to-Views Ratio"
+- `reactions_by_type` — breakdown 7 jenis reaksi Facebook
+- `followers_reach_pct`/`non_followers_reach_pct` — versi Facebook dari
+  konsep "FYP%"/discovery reach (makin tinggi % non-follower = makin luas
+  disebar algoritma ke luar audiens sendiri)
+- `age_breakdown` — demografi usia penonton
+- `monetization` — status kelayakan 5 kategori (Bintang, Monetisasi konten,
+  Iklan instream, Iklan di reel, Langganan)
+- `traffic_source_available`/`link_clicks_available` — Facebook sering
+  belum cukup data utk akun kecil (ditandai `false`, bukan silently kosong)
+
+Hasil masuk ke `result["post_detail"]` (list, 1 entry per caption yang
+dicoba, tiap entry punya `parsed` terstruktur + fallback `note` kalau klik
+gagal ketemu elemen).
+
 ### Reliabilitas & keterbatasan (baca sebelum percaya buta)
 
 - **Ini scraping UI, bukan API resmi.** Kalau Facebook ubah tampilan Dasbor
