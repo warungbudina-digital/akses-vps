@@ -540,11 +540,105 @@ def parse_posts(raw_text):
     return posts
 
 
+# Label monetisasi TETAP di halaman "Insight postingan" (2026-08-25) --
+# dicek satu-satu status "Tidak memenuhi syarat" / lainnya di sebelahnya.
+MONETIZATION_LABELS = ["Bintang", "Monetisasi konten", "Iklan instream", "Iklan di reel", "Langganan"]
+# Urutan 7 tipe reaksi standar Facebook (Like/Love/Care/Haha/Wow/Sedih/Marah)
+# -- FB TAK cetak nama tiap tipe di dump teks, cuma urutan angkanya, jadi
+# label ini ASUMSI berdasar urutan baku UI Facebook, BUKAN dikonfirmasi
+# per-elemen (kalau meleset, angka mentahnya tetap ada di "raw" fallback).
+REACTION_TYPE_LABELS = ["suka", "cinta", "peduli", "haha", "wow", "sedih", "marah"]
+
+
+def parse_post_detail(text):
+    """Parser best-effort halaman 'Insight Postingan' (beda struktur total
+    dari tabel Galeri Konten -- ini utk metrik lebih dalam yg TAK ADA di
+    tabel ringkasan: shares, breakdown reaksi, follower-vs-non-follower,
+    demografi usia). SELALU return dict lengkap (None utk yg tak ketemu),
+    JANGAN raise -- caller selalu punya `raw` sbg fallback lossless."""
+    out = {
+        "video_duration": None, "views": None, "reach": None, "revenue": None,
+        "monetization": {}, "interactions_total": None, "reactions": None,
+        "clicks": None, "comments": None, "shares": None,
+        "reactions_by_type": None, "followers_reach_pct": None,
+        "followers_reach_count": None, "non_followers_reach_pct": None,
+        "non_followers_reach_count": None, "age_breakdown": {},
+        "traffic_source_available": None, "link_clicks_available": None,
+        "posted_at": None,
+    }
+    if not isinstance(text, str) or not text:
+        return out
+
+    m = re.search(r"0:00\s*/\s*(\d+:\d+)", text)
+    if m:
+        out["video_duration"] = m.group(1)
+
+    m = re.search(r"Tayangan\s*\n(\d[\d.,]*)\s*\nPemirsa\s*\n(\d[\d.,]*)", text)
+    if m:
+        out["views"], out["reach"] = m.group(1), m.group(2)
+
+    m = re.search(r"(\$[\d.,]+)\s*Perkiraan pendapatan", text)
+    if m:
+        out["revenue"] = m.group(1)
+
+    for label in MONETIZATION_LABELS:
+        m = re.search(re.escape(label) + r"\s*\n\s*([^\n]+)", text)
+        if m:
+            out["monetization"][label] = m.group(1).strip()
+
+    m = re.search(
+        r"(\d+)\s*Interaksi.*?\n(\d+)\s*\nTanggapan\s*\n(\d+)\s*\nKlik\s*\n"
+        r"(\d+)\s*\nKomentar\s*\n(\d+)\s*\nFrekuensi Dibagikan",
+        text, re.DOTALL)
+    if m:
+        out["interactions_total"], out["reactions"], out["clicks"], \
+            out["comments"], out["shares"] = m.groups()
+
+    m = re.search(
+        r"Tanggapan berdasarkan jenis\s*\n" + r"\s*\n".join([r"(\d+)"] * 7),
+        text)
+    if m:
+        out["reactions_by_type"] = dict(zip(REACTION_TYPE_LABELS, m.groups()))
+
+    m = re.search(
+        r"Pengikut vs\.? Non-pengikut\s*\n([\d.,]+%)\s*\n([\d.,]+)\s*\nPengikut\s*\n"
+        r"([\d.,]+%)\s*\n([\d.,]+)\s*\nNon-pengikut",
+        text)
+    if m:
+        (out["followers_reach_pct"], out["followers_reach_count"],
+         out["non_followers_reach_pct"], out["non_followers_reach_count"]) = m.groups()
+
+    # umur: pasangan berulang "NN-NN\nPP.P%" -- ambil SEMUA kemunculan (tak
+    # perlu heading spesifik krn pola angka-rentang-umur cukup unik).
+    for age_m in re.finditer(r"(\d{2}-\d{2})\s*\n\s*([\d.,]+%)", text):
+        out["age_breakdown"][age_m.group(1)] = age_m.group(2)
+
+    def _section_has_data(heading):
+        m2 = re.search(re.escape(heading) + r".{0,40}?\n(.{0,40})", text, re.DOTALL)
+        if not m2:
+            return None  # heading sendiri tak ketemu -- beda dari "ketemu tapi kosong"
+        return "Insight tidak tersedia" not in m2.group(1)
+
+    out["traffic_source_available"] = _section_has_data("Bagaimana orang menemukan konten Anda")
+    out["link_clicks_available"] = _section_has_data("Klik tautan")
+
+    m = re.search(r"(\d{1,2} \w+ pada \d{1,2}[.:]\d{2})", text)
+    if m:
+        out["posted_at"] = m.group(1)
+
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--account", required=True, help='nama PERSIS di pemilih-akun FB, mis. "Go Go Bud"')
     ap.add_argument("--profile", default="Profile 28", help='direktori profil Chrome (default: Profile 28 / Budayana)')
     ap.add_argument("--keep-tab", action="store_true", help="jangan tutup tab setelah selesai")
+    ap.add_argument("--post-detail", action="store_true",
+                     help="klik masuk ke detail per-postingan (shares/reaksi/demografi/follower-split) "
+                          "-- data yg TAK ADA di tabel ringkasan Galeri Konten")
+    ap.add_argument("--post-detail-count", type=int, default=1,
+                     help="berapa postingan (dari yg terbaru) yg mau digali detailnya (default 1, lebih besar = lebih lama)")
     ap.add_argument("--days", default="28 hari terakhir", help="label rentang waktu insight (informational saja, FB pakai default periode terakhir)")
     args = ap.parse_args()
 
@@ -639,6 +733,34 @@ def main():
             cdp_click_text(tid, "Galeri Konten")
             content_raw = wait_for_text(tid, "Pratinjau")
         sections["content_raw"] = content_raw
+
+        # 4b. (opsional, --post-detail) klik masuk ke detail postingan
+        #     PERTAMA di galeri -- metrik lebih dalam yg TAK ADA di baris
+        #     ringkasan tabel Galeri Konten (shares, breakdown reaksi,
+        #     follower-vs-non-follower, demografi usia -- lihat
+        #     parse_post_detail()). Diparse per-caption, tersimpan di
+        #     result["post_detail"] (list, 1 entry per caption yg dicoba).
+        result["post_detail"] = []
+        if args.post_detail:
+            _tmp_posts = parse_posts(content_raw)
+            for _p in _tmp_posts[:args.post_detail_count]:
+                cap = _p["caption"]
+                entry = {"caption": cap}
+                if cdp_click_text(tid, cap):
+                    detail_raw = wait_for_text(tid, "Interaksi", timeout_s=8)
+                    entry["parsed"] = parse_post_detail(detail_raw)
+                    sections.setdefault("post_detail_raw", []).append(detail_raw)
+                    if args.post_detail_count > 1:
+                        # balik ke galeri utk caption berikutnya -- history.back()
+                        # lebih pasti drpd tebak nama tombol "Kembali"/"Tutup"/dll
+                        # (FB tak konsisten, sesi eksplorasi 2026-08-25 lihat modal
+                        # detail bisa muncul beda2 cara).
+                        cdp_eval_text(tid, "history.back(); 1")
+                        wait_for_text(tid, "Pratinjau", timeout_s=8)
+                else:
+                    entry["parsed"] = None
+                    entry["note"] = "klik caption gagal ketemu elemen"
+                result["post_detail"].append(entry)
 
         def grab_number_before_label(label, text):
             """Pola nyata di Dasbor FB: NOMOR \\n PERSEN% \\n LABEL (nomor
