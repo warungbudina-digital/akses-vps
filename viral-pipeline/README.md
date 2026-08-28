@@ -53,7 +53,12 @@ Salinan di node lain (DB-VPS, .50) adalah salinan-jalan — sinkronkan dari sini
 Orchestrator/run-drain berhenti dengan pesan jelas kalau .50 belum aktif/healthy — preflight
 memeriksa `/healthz`, DB-VPS, dan kelengkapan tools/cookies sebelum menyentuh antrean.
 
-**Belum ada:** cron poster untuk run-drain (opsional; `*/5 * * * * bash ~/viral-pipeline/run-drain.sh`).
+**✅ 2026-08-28:** cron poster untuk run-drain SUDAH ADA (permintaan user) — TAPI bukan
+langsung `run-drain.sh` polos, ada gerbang tambahan `~/akses-vps/backup/analyzer-pipeline-trigger.sh`
+(dijadwalkan `*/10 22-23,0-14 * * *` UTC di HUB) yang cek dulu SEMUA 3 Cloud Shell (.50/.60/.61)
+reachable sebelum memanggil `run-drain.sh` — sinyal "node hari ini benar2 hidup semua", bukan
+keharusan teknis (`run-drain.sh`/`orchestrator.py` sendiri cuma butuh `.50`+DB-VPS). Log:
+`~/analyzer-pipeline-trigger.log` (HUB).
 
 ## Reproduksi ke VN (Infinix)
 
