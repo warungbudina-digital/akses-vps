@@ -33,9 +33,19 @@ function textStyleKategoriOptions() { return Object.keys(VN_CATALOG.textStyle.ka
 
 let babakRows = [];
 
+let footageIndex = { remote: "gfootage:RAW-VIDEO", generated_at: null, ok: false, files: [] };
+
+async function loadFootageIndex() {
+  try {
+    const res = await fetch("footage-index.json", { cache: "no-store" });
+    if (res.ok) footageIndex = await res.json();
+  } catch { /* belum ada file / offline — biarkan default kosong, field tetap free-text */ }
+  renderAllFootagePickers();
+}
+
 function defaultBabak(label, durasi) {
   return {
-    id: uid(), label, durasi, brief: "", teksTampil: "",
+    id: uid(), label, durasi, brief: "", teksTampil: "", footage: "",
     // -- style dasar --
     camera: "Tidak ada", speedTab: "Regular", speedPilihan: "1.0x",
     filterKategori: "Original", filterPilihan: "Original (tanpa filter)", filterIntensity: 100,
@@ -71,6 +81,27 @@ function seedBabakDefault() {
 function renderBabakForm() {
   const wrap = document.getElementById("babak-list");
   wrap.innerHTML = babakRows.map((b, i) => babakRowHtml(b, i)).join("");
+  renderAllFootagePickers();
+}
+
+function footageIndexHint() {
+  if (!footageIndex.generated_at) return "Indeks footage gdrive belum tersedia (cron refresh belum sempat jalan) — ketik path manual.";
+  const n = footageIndex.files.length;
+  const when = new Date(footageIndex.generated_at).toLocaleString("id-ID");
+  return n
+    ? `${n} file di ${footageIndex.remote} (update ${when}) — klik utk tambah:`
+    : `${footageIndex.remote} masih KOSONG saat ini (update ${when}) — upload footage ke folder itu dulu, lalu ketik path manual di sini atau tunggu refresh berikutnya (cron tiap 30mnt).`;
+}
+
+function renderAllFootagePickers() {
+  document.querySelectorAll(".footage-picker").forEach(el => {
+    const id = el.dataset.babak;
+    const hint = `<p class="muted footage-hint">${footageIndexHint()}</p>`;
+    const chips = footageIndex.files.map(f =>
+      `<button type="button" class="chip" data-babak="${id}" data-path="${escAttr(f.path)}">${escHtml(f.name)}</button>`
+    ).join(" ");
+    el.innerHTML = hint + chips;
+  });
 }
 
 function chk(f, checked, label) {
@@ -98,6 +129,11 @@ function babakRowHtml(b, i) {
     <label class="fld">Teks tampil di layar / subtitle (kata-kata literal, kosongkan kalau tak perlu teks)
       <textarea data-f="teksTampil" rows="1" placeholder="Mis: Promo cuma hari ini!">${escHtml(b.teksTampil)}</textarea>
     </label>
+
+    <label class="fld">Footage — path/nama file gdrive (1 per baris; ≥2 baris = disatukan berurutan jadi 1 babak)
+      <textarea data-f="footage" rows="2" placeholder="gfootage:RAW-VIDEO/nama-file.mp4 (klik pilihan di bawah, atau ketik manual)">${escHtml(b.footage)}</textarea>
+    </label>
+    <div class="footage-picker" data-babak="${b.id}"></div>
 
     <h3 class="section-h">Style dasar</h3>
     <div class="grid2">
@@ -380,6 +416,7 @@ function buildBlueprint(meta) {
       durasi_detik: b.durasi,
       brief_kreatif: b.brief,
       teks_tampil: b.teksTampil || null,
+      footage: b.footage ? b.footage.split("\n").map(s => s.trim()).filter(Boolean) : [],
       camera_movement: { selector: VN_CATALOG.cameraMovement.selector, pilihan: b.camera },
       speed: b.speedPilihan === "1.0x" ? null : {
         selector: VN_CATALOG.speed.selector, tab: b.speedTab, pilihan: b.speedPilihan,
@@ -463,6 +500,13 @@ function buildRecipe(meta, bp) {
   lines.push(`> Klien: ${meta.klien || "-"} · Rasio: ${meta.rasio} · Dibuat: ${new Date().toLocaleString("id-ID")}`);
   if (meta.instruksiUmum) lines.push(`\n**Instruksi/mood umum:** ${meta.instruksiUmum}`);
   lines.push("\n**Sebelum mulai:** buka proyek baru di VN (rasio " + meta.rasio + "), impor klip sesuai urutan babak di bawah, lalu ikuti tiap babak SECARA BERURUTAN — instruksi ditulis pakai label tombol/tab persis seperti yang tampil di VN.");
+
+  const babakTanpaFootage = bp.babak.filter(b => !b.footage.length).map(b => b.label);
+  const adaFootage = bp.babak.some(b => b.footage.length);
+  if (adaFootage)
+    lines.push(`\n**Footage sumber:** tarik file dari Google Drive (\`${footageIndex.remote}\` atau lokasi lain yang Anda tulis) ke device VN dulu (Drive app / \`rclone copy\` / transfer manual), baru impor lewat picker VN (\`VideoEditorMatisseActivity\` — tab **Stok** kalau file sudah tersinkron di app Drive, atau **Semua** kalau sudah ada lokal di galeri). Klip baru SELALU masuk di **ujung** track (bukan sisip), jadi impor sesuai urutan babak di bawah.`);
+  if (babakTanpaFootage.length)
+    lines.push(`\n⚠️ **Babak TANPA footage ditentukan:** ${babakTanpaFootage.join(", ")} — isi field Footage di dashboard dulu, atau siapkan klip generik/b-roll manual sebelum eksekusi.`);
   if (bp.musik)
     lines.push(`\n**Musik latar:** trek musik (\`editor_track_music_add\`) → tab Musik → genre **"${bp.musik.genre}"** (kalau katalog cloud gagal load, pakai tab Milikmu dengan file sendiri).`);
 
@@ -486,6 +530,13 @@ function buildRecipe(meta, bp) {
     if (b.teks_tampil) lines.push(`\n**Teks tampil:** "${b.teks_tampil}"`);
     lines.push("\n**Langkah eksekusi di VN:**");
     const steps = [];
+    if (b.footage.length === 1) {
+      steps.push(`Impor footage: **${b.footage[0]}** → tambah di ujung main-track ("+"/\`editor_track_main_add\`).`);
+    } else if (b.footage.length > 1) {
+      steps.push(`Impor footage (${b.footage.length} klip, DISATUKAN berurutan sesuai daftar berikut — tiap klip nambah otomatis di ujung track, ulangi "+" per klip): ${b.footage.map((f, idx) => `${idx + 1}) ${f}`).join(" · ")}.`);
+    } else {
+      steps.push(`⚠️ Footage belum ditentukan untuk babak ini — tentukan/siapkan klip dulu sebelum lanjut.`);
+    }
     if (b.teks_tampil && bp.subtitle_method.jalur !== "Impor SRT")
       steps.push(`Trek T+ → Insert → **Text** → pilih template kategori **"${b.text_style.kategori}"** → ketik: **"${b.teks_tampil}"**.`);
     else if (b.teks_tampil)
@@ -706,7 +757,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("babak-list").addEventListener("click", (e) => {
     if (e.target.matches(".btn-remove")) removeBabak(e.target.closest(".babak").dataset.id);
+    if (e.target.matches(".chip")) {
+      readBabakFromDom();
+      const row = babakRows.find(b => b.id === e.target.dataset.babak);
+      if (row) {
+        row.footage = row.footage ? `${row.footage}\n${e.target.dataset.path}` : e.target.dataset.path;
+        renderBabakForm();
+      }
+    }
   });
+  loadFootageIndex();
   document.getElementById("btn-add-babak").addEventListener("click", addBabak);
   document.getElementById("gen-form").addEventListener("submit", onGenerate);
 

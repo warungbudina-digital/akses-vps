@@ -47,6 +47,9 @@ nginx/dashboards/*/index.html
 viral-pipeline/dashboard.html
 # editor.obc-crypto.com password hash - secret, not code
 nginx/snippets/.htpasswd-editor
+# editor.obc-crypto.com footage picker - generated snapshot (cron, every 30min
+# via viral-pipeline/footage-index-refresh.sh), not hand-authored code
+nginx/dashboards/editor/footage-index.json
 # Output reproduksi VN per-job (ir_to_vn.py, dibuat otomatis oleh
 # orchestrator.py sejak 2026-08-28) -- data hasil run, bukan kode.
 viral-pipeline/reproductions/
