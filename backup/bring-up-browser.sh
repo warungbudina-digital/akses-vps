@@ -31,8 +31,18 @@ REPO_URL="https://github.com/warungbudina-digital/browser.git"
 BUILD_WAIT="${BUILD_WAIT:-360}"    # detik; build Chromium cold ~3-4mnt
 
 log(){ echo "[bring-up-browser $(date -u +%H:%M:%S)] $*"; }
+# (2026-08-28 fix) .60 EPHEMERAL -> host-key BEDA tiap wake (VM baru, IP
+# sama). `accept-new` cuma otomatis-terima host BARU, tapi MENOLAK TOTAL
+# kalau ada entri lama yg beda ("Host key has changed", dikira MITM) --
+# persis Bug KELIMA yg sudah difix di reachable_cs()/lib-cs-deploy.sh
+# (2026-08-24) TAPI lupa ikut diterapkan di sini. Reproduksi live 28/8:
+# bootstrap .60 sukses penuh (WG+SSH ready, manual-verified reachable)
+# TAPI bring-up-browser.sh tetap lapor "GAGAL: .60 tak bisa di-SSH" --
+# `ssh -v` konfirmasi persis "WARNING: REMOTE HOST IDENTIFICATION HAS
+# CHANGED". Fix: StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null
+# (aman, .60 cuma reachable via WireGuard privat sendiri).
 ssh60(){ ssh -o ControlPath=none -i "$C60_KEY" -o IdentitiesOnly=yes \
-         -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
          -o BatchMode=yes -p 22 "$C60_HOST" "$@"; }
 hs(){ curl -m8 -s -o /dev/null -w '%{http_code}' "$API$1" 2>/dev/null; }
 
