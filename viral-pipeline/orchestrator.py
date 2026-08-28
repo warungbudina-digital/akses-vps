@@ -24,6 +24,12 @@ ANALYZER    = "http://127.0.0.1:9021"
 COOKIES     = {"youtube":"yt-cookies.txt", "facebook":"fb-cookies.txt", "instagram":"ig-cookies.txt"}
 MAX_JOBS    = int(os.getenv("MAX_JOBS", "0"))
 ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "1200"))  # detik; whisper CPU (V2) utk video panjang bisa >5mnt
+# (2026-08-28) celah #3 audit otomatisasi: job yg gagal permanen ('dead' stlh
+# max_attempts habis) dulu diam total di DB, tak ada yg tahu kecuali cek
+# manual -- beda dgn wake-orchestrator.sh yg SELALU notify Telegram. Fix:
+# reuse helper yg sama (send-telegram.sh, no-op anggun kalau kredensial
+# belum diisi -- lihat isi skrip itu).
+TELEGRAM_SCRIPT = os.path.expanduser("~/akses-vps/backup/send-telegram.sh")
 
 def sh(args, inp=None, timeout=None):
     return subprocess.run(args, input=inp, capture_output=True, text=True, timeout=timeout)
@@ -39,6 +45,21 @@ def psql(sql, timeout=30):
 
 def log(*a):
     print("[orch]", *a, flush=True)
+
+def notify(msg):
+    # best-effort, TAK PERNAH boleh gagalkan drain kalau Telegram/jaringan
+    # bermasalah -- notifikasi ini pelengkap, bukan jalur kritis pipeline.
+    # Hasil TETAP dilog (bukan cuma diam) supaya kegagalan kirim (mis.
+    # kredensial belum diisi / API error) ketahuan dari log, bukan asumsi
+    # "pasti terkirim" begitu saja.
+    try:
+        r = sh([TELEGRAM_SCRIPT, msg], timeout=15)
+        if r.returncode == 0:
+            log("  notify Telegram terkirim.")
+        else:
+            log("  (notify Telegram gagal, rc=%s):" % r.returncode, (r.stderr or r.stdout or "").strip()[:150])
+    except Exception as e:
+        log("  (notify Telegram gagal, exception):", repr(e)[:150])
 
 def preflight():
     r = ssh_c50(f"curl -sf {ANALYZER}/healthz", timeout=20)
@@ -73,10 +94,26 @@ def claim():
                     "platform": j["platform"], "url": j["url"]}
     return None
 
-def fail_job(jid, err):
+def fail_job(job, err):
+    jid = job["id"]
     e = err.replace("'", "''")[:1000]
-    psql("UPDATE media.video_ingest SET status = CASE WHEN attempts >= max_attempts THEN 'dead' "
-         f"ELSE 'pending' END, last_error='{e}', updated_at=now() WHERE id={jid};")
+    # RETURNING status -> tahu di request YANG SAMA apakah job ini baru saja
+    # mati permanen (dead) atau masih akan di-retry (pending), tanpa query
+    # tambahan.
+    r = psql("UPDATE media.video_ingest SET status = CASE WHEN attempts >= max_attempts THEN 'dead' "
+             f"ELSE 'pending' END, last_error='{e}', updated_at=now() WHERE id={jid} RETURNING status;")
+    # (2026-08-28) ketahuan live-test: stdout psql BUKAN cuma nilai RETURNING
+    # ("dead"/"pending") -- ada baris tag perintah menyusul ("UPDATE 1"), jadi
+    # 'pending\nUPDATE 1\n'. .strip() polos TAK PERNAH match persis "dead" --
+    # notify() akibatnya tak pernah terpicu (bug diam, ketahuan krn ada log
+    # eksplisit di notify() sendiri, bukan krn ada error). Ambil baris
+    # PERTAMA saja, pola sama spt claim() yg sudah lama tahu soal ini.
+    lines = (r.stdout or "").strip().splitlines()
+    status = lines[0].strip() if lines else ""
+    if status == "dead":
+        notify(f"⚠️ viral-pipeline: job #{jid} MATI PERMANEN (habis retry) -- "
+               f"{job.get('platform','?')}/{job.get('category','?')} {job.get('url','')[:200]}\n"
+               f"Error terakhir: {err[:300]}")
 
 def download(job):
     cookie = COOKIES.get(job["platform"])
@@ -153,24 +190,24 @@ def main():
         try:
             relpath, err = download(job)
             if err:
-                log("  x download:", err); fail_job(job["id"], err); fail += 1; continue
+                log("  x download:", err); fail_job(job, err); fail += 1; continue
             log("  downloaded:", relpath)
             cpath, err = stream_to_c50(job, relpath)
             if err:
-                log("  x stream:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
+                log("  x stream:", err); fail_job(job, err); cleanup(job["id"]); fail += 1; continue
             data, err = analyze(cpath)
             if err:
-                log("  x analyze:", err); fail_job(job["id"], err); cleanup(job["id"]); fail += 1; continue
+                log("  x analyze:", err); fail_job(job, err); cleanup(job["id"]); fail += 1; continue
             werr = write_result(job, data)
             if werr:
-                log("  x write:", werr); fail_job(job["id"], werr); cleanup(job["id"]); fail += 1; continue
+                log("  x write:", werr); fail_job(job, werr); cleanup(job["id"]); fail += 1; continue
             cleanup(job["id"])
             ok += 1
             sc = len(data["analysis"].get("scene_analysis", []))
             log(f"  OK: status={data['status']} scenes={sc} bpm={data['analysis'].get('bpm')}")
         except Exception as e:
             # TimeoutExpired dll TAK boleh crash seluruh drain + menyangkutkan job di 'processing'
-            log("  x exception:", repr(e)[:200]); fail_job(job["id"], f"exception: {e}"[:800]); cleanup(job["id"]); fail += 1; continue
+            log("  x exception:", repr(e)[:200]); fail_job(job, f"exception: {e}"[:800]); cleanup(job["id"]); fail += 1; continue
     log(f"SELESAI: {ok} sukses, {fail} gagal, {done} diproses.")
 
 if __name__ == "__main__":
