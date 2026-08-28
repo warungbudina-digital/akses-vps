@@ -45,10 +45,16 @@
             <option>File sendiri (tab Milikmu)</option>
           </select>
         </label>
-        <label class="chk" style="margin-top:22px">
-          <input type="checkbox" id="f-storyline"> Susun juga sebagai Storyline (opsional, bahan narasi/AI)
+        <label class="fld">Jalur penambahan subtitle
+          <select id="f-subtitle-method">
+            <option>Manual per-babak (in-app)</option>
+            <option>Impor SRT</option>
+          </select>
         </label>
       </div>
+      <label class="chk">
+        <input type="checkbox" id="f-storyline"> Susun juga sebagai Storyline (opsional, bahan narasi/AI)
+      </label>
     </div>
 
     <h2>Babak (bagian editing)</h2>
@@ -75,6 +81,13 @@
       <pre id="out-json"></pre>
       <div class="btn-row">
         <button type="button" id="btn-dl-json" class="btn-ghost">Download .json</button>
+      </div>
+    </div>
+    <div class="card" id="srt-card" hidden>
+      <strong>.srt</strong> — <span class="muted">dibangun dari field "Teks tampil di layar" tiap babak — push ke /sdcard/Download/ lalu impor via jalur SRT (§23a)</span>
+      <pre id="out-srt"></pre>
+      <div class="btn-row">
+        <button type="button" id="btn-dl-srt" class="btn-ghost">Download .srt</button>
       </div>
     </div>
   </section>

@@ -35,7 +35,7 @@ let babakRows = [];
 
 function defaultBabak(label, durasi) {
   return {
-    id: uid(), label, durasi, brief: "",
+    id: uid(), label, durasi, brief: "", teksTampil: "",
     // -- style dasar --
     camera: "Tidak ada", speedTab: "Regular", speedPilihan: "1.0x",
     filterKategori: "Original", filterPilihan: "Original (tanpa filter)", filterIntensity: 100,
@@ -59,7 +59,8 @@ function defaultBabak(label, durasi) {
     autoCaption: false, freezeFrame: false,
     // -- detail lanjutan: teks --
     textColorCatatan: "", textAlign: "Tidak diubah", textCase: "Tidak diubah",
-    textListStyle: "Tidak ada", textBold: false, textItalic: false, textSizePilihan: "Tidak diubah"
+    textListStyle: "Tidak ada", textBold: false, textItalic: false, textSizePilihan: "Tidak diubah",
+    textFontCatatan: "", textSpacingCatatan: "", blendModeCatatan: "", layerPositionCatatan: ""
   };
 }
 
@@ -92,6 +93,10 @@ function babakRowHtml(b, i) {
 
     <label class="fld">Brief kreatif / ide visualisasi klien
       <textarea data-f="brief" rows="2" placeholder="Mis: buka dengan wajah kaget, kamera goyang cepat, mood energik...">${escHtml(b.brief)}</textarea>
+    </label>
+
+    <label class="fld">Teks tampil di layar / subtitle (kata-kata literal, kosongkan kalau tak perlu teks)
+      <textarea data-f="teksTampil" rows="1" placeholder="Mis: Promo cuma hari ini!">${escHtml(b.teksTampil)}</textarea>
     </label>
 
     <h3 class="section-h">Style dasar</h3>
@@ -244,6 +249,20 @@ function babakRowHtml(b, i) {
       <label class="fld">Warna teks (4 target: Text/Stroke/Shadow/Background — picker tak terwakili dropdown, tulis kebutuhan)
         <input type="text" data-f="textColorCatatan" value="${escAttr(b.textColorCatatan)}" placeholder="Mis: teks putih, stroke hitam 2px">
       </label>
+      <div class="grid2">
+        <label class="fld">Font <span class="tag flag">flag</span> (Brand Kit = login-gated)
+          <input type="text" data-f="textFontCatatan" value="${escAttr(b.textFontCatatan)}" placeholder="Mis: font impor lokal 'Poppins Bold'">
+        </label>
+        <label class="fld">Spacing (letter/line)
+          <input type="text" data-f="textSpacingCatatan" value="${escAttr(b.textSpacingCatatan)}" placeholder="Mis: line spacing rapat">
+        </label>
+        <label class="fld">Blend mode
+          <input type="text" data-f="blendModeCatatan" value="${escAttr(b.blendModeCatatan)}" placeholder="Mis: Multiply (cek live, belum dienum)">
+        </label>
+        <label class="fld">Layer position (Z-order)
+          <input type="text" data-f="layerPositionCatatan" value="${escAttr(b.layerPositionCatatan)}" placeholder="Mis: bawa teks ke depan overlay">
+        </label>
+      </div>
     </details>
   </fieldset>`;
 }
@@ -278,6 +297,10 @@ function countAktif(b) {
   if (b.textBold) n++;
   if (b.textItalic) n++;
   if (b.textSizePilihan !== "Tidak diubah") n++;
+  if (b.textFontCatatan) n++;
+  if (b.textSpacingCatatan) n++;
+  if (b.blendModeCatatan) n++;
+  if (b.layerPositionCatatan) n++;
   return n;
 }
 
@@ -347,12 +370,16 @@ function buildBlueprint(meta) {
     instruksi_umum: meta.instruksiUmum,
     musik: meta.musikGenre && meta.musikGenre !== "Tidak pakai musik" ? { selector: VN_CATALOG.musik.selector, genre: meta.musikGenre } : null,
     storyline: meta.storyline ? { selector: VN_CATALOG.storyline.selector, catatan: VN_CATALOG.storyline.catatan } : null,
+    subtitle_method: meta.subtitleMethod === "Impor SRT"
+      ? { jalur: "Impor SRT", ...VN_CATALOG.subtitle.importSrt }
+      : { jalur: "Manual per-babak (in-app)", ...VN_CATALOG.subtitle.manual },
     catalog_sumber: VN_CATALOG.meta.sumber,
     babak: babakRows.map((b, i) => ({
       index: i + 1,
       label: b.label,
       durasi_detik: b.durasi,
       brief_kreatif: b.brief,
+      teks_tampil: b.teksTampil || null,
       camera_movement: { selector: VN_CATALOG.cameraMovement.selector, pilihan: b.camera },
       speed: b.speedPilihan === "1.0x" ? null : {
         selector: VN_CATALOG.speed.selector, tab: b.speedTab, pilihan: b.speedPilihan,
@@ -405,13 +432,18 @@ function buildBlueprint(meta) {
       } : null,
 
       teks_detail: (b.textColorCatatan || b.textAlign !== "Tidak diubah" || b.textCase !== "Tidak diubah" ||
-        b.textListStyle !== "Tidak ada" || b.textBold || b.textItalic || b.textSizePilihan !== "Tidak diubah") ? {
+        b.textListStyle !== "Tidak ada" || b.textBold || b.textItalic || b.textSizePilihan !== "Tidak diubah" ||
+        b.textFontCatatan || b.textSpacingCatatan || b.blendModeCatatan || b.layerPositionCatatan) ? {
         warna_catatan: b.textColorCatatan || null,
         alignment: b.textAlign !== "Tidak diubah" ? b.textAlign : null,
         case: b.textCase !== "Tidak diubah" ? b.textCase : null,
         list_style: b.textListStyle !== "Tidak ada" ? b.textListStyle : null,
         bold: b.textBold || null, italic: b.textItalic || null,
-        ukuran: b.textSizePilihan !== "Tidak diubah" ? b.textSizePilihan : null
+        ukuran: b.textSizePilihan !== "Tidak diubah" ? b.textSizePilihan : null,
+        font_catatan: b.textFontCatatan || null,
+        spacing_catatan: b.textSpacingCatatan || null,
+        blend_mode_catatan: b.blendModeCatatan || null,
+        layer_position_catatan: b.layerPositionCatatan || null
       } : null
     }))
   };
@@ -433,6 +465,17 @@ function buildRecipe(meta, bp) {
   lines.push("\n**Sebelum mulai:** buka proyek baru di VN (rasio " + meta.rasio + "), impor klip sesuai urutan babak di bawah, lalu ikuti tiap babak SECARA BERURUTAN — instruksi ditulis pakai label tombol/tab persis seperti yang tampil di VN.");
   if (bp.musik)
     lines.push(`\n**Musik latar:** trek musik (\`editor_track_music_add\`) → tab Musik → genre **"${bp.musik.genre}"** (kalau katalog cloud gagal load, pakai tab Milikmu dengan file sendiri).`);
+
+  const babakDenganTeks = bp.babak.filter(b => b.teks_tampil);
+  if (babakDenganTeks.length && bp.subtitle_method.jalur === "Impor SRT") {
+    lines.push(`\n**Subtitle — jalur Impor SRT:** JANGAN ketik teks satu-per-satu di editor. Download file ` +
+      `\`.srt\` di bawah halaman ini → \`adb push namafile.srt /sdcard/Download/\` ke device VN → di ` +
+      `\`EditorActivity\` (tanpa klip terpilih) ketuk baris trek subtitle → popup **"Insert"** → **"SRT Files"** ` +
+      `→ dialog "Impor File SRT" → **"Impor dari Aplikasi File"** → pilih file dari **"FILE TERBARU"** ` +
+      `(kalau belum muncul, picu scan media dulu). Timing tiap baris otomatis sesuai timestamp babak.`);
+  } else if (babakDenganTeks.length) {
+    lines.push(`\n**Subtitle — jalur manual per-babak:** trek T+ (\`editor_track_subtitle_add\`) di tiap babak → sheet Insert → **"Text"** → pilih template gaya (lihat tiap babak di bawah) → ketik isi teks persis seperti tercantum.`);
+  }
   lines.push("\n---\n");
 
   bp.babak.forEach((b, i) => {
@@ -440,8 +483,13 @@ function buildRecipe(meta, bp) {
     t = t1;
     lines.push(`## Babak ${i + 1} — ${b.label} (${fmtTs(t0)}–${fmtTs(t1)}, ${b.durasi_detik}s)`);
     if (b.brief_kreatif) lines.push(`\n**Ide kreatif:** ${b.brief_kreatif}`);
+    if (b.teks_tampil) lines.push(`\n**Teks tampil:** "${b.teks_tampil}"`);
     lines.push("\n**Langkah eksekusi di VN:**");
     const steps = [];
+    if (b.teks_tampil && bp.subtitle_method.jalur !== "Impor SRT")
+      steps.push(`Trek T+ → Insert → **Text** → pilih template kategori **"${b.text_style.kategori}"** → ketik: **"${b.teks_tampil}"**.`);
+    else if (b.teks_tampil)
+      steps.push(`(Teks babak ini SUDAH termasuk di file .srt yang di-generate — lihat instruksi Impor SRT di atas, jangan ketik ulang manual.)`);
     if (b.camera_movement.pilihan !== "Tidak ada")
       steps.push(`Pilih klip babak ini → toolbar **Perbesar** (clipZoom) → pilih **"${b.camera_movement.pilihan}"**.`);
     if (b.speed)
@@ -452,8 +500,6 @@ function buildRecipe(meta, bp) {
       steps.push(`Toolbar **FX** → kategori **"${b.fx.kategori}"** → pilih **"${b.fx.pilihan}"**${String(b.fx.pilihan).includes("👑") ? " (⚠️ Pro-gated)" : ""}.`);
     if (b.voice_effect)
       steps.push(`Toolbar **voiceEffect** → pilih **"${b.voice_effect.pilihan}"**.`);
-    if (b.text_style)
-      steps.push(`Tambah teks (trek T+) → panel gaya → kategori **"${b.text_style.kategori}"** → tulis narasi/caption babak ini.`);
     if (b.transisi_masuk)
       steps.push(`Di batas AWAL babak ini: tap titik sambung klip → tab **"${b.transisi_masuk.tab}"** → pilih **"${b.transisi_masuk.pilihan}"** → set durasi **${b.transisi_masuk.durasi_detik}s**${b.transisi_masuk.gating === "credit" ? " (⚠️ AI berbayar kredit — cek saldo dulu)" : ""}.`);
     if (b.catatan_animasi_kustom)
@@ -503,6 +549,10 @@ function buildRecipe(meta, bp) {
       if (td.ukuran) bits.push(`ukuran ${td.ukuran}`);
       if (bits.length) steps.push(`Toolbar teks **Format** (A≡) / **Size** (AA): ${bits.join(", ")}.`);
       if (td.warna_catatan) steps.push(`Toolbar teks **Color** (roda-warna, 4 target Text/Stroke/Shadow/Background): ${td.warna_catatan}.`);
+      if (td.font_catatan) steps.push(`Toolbar teks **Font** (Ff): ${td.font_catatan}.`);
+      if (td.spacing_catatan) steps.push(`Toolbar teks **Spacing**: ${td.spacing_catatan}.`);
+      if (td.blend_mode_catatan) steps.push(`Toolbar **blendMode**: ${td.blend_mode_catatan}.`);
+      if (td.layer_position_catatan) steps.push(`Toolbar **layerPosition**: ${td.layer_position_catatan}.`);
     }
 
     if (steps.length === 0) steps.push("Tanpa style tambahan — pakai klip apa adanya sesuai brief kreatif di atas.");
@@ -518,6 +568,33 @@ function buildRecipe(meta, bp) {
   lines.push("\n---\n");
   lines.push(`**Total durasi rencana:** ${fmtTs(t)} (${t.toFixed(1)}s) — cocokkan dengan \`total_textView\` di VN setelah semua klip disusun.`);
   return lines.join("\n");
+}
+
+function fmtSrtTs(sec) {
+  const s = Math.max(0, sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = Math.floor(s % 60);
+  const ms = Math.round((s - Math.floor(s)) * 1000);
+  const p2 = n => String(n).padStart(2, "0");
+  const p3 = n => String(n).padStart(3, "0");
+  return `${p2(h)}:${p2(m)}:${p2(ss)},${p3(ms)}`;
+}
+
+// Bangun file .srt standar dari teks_tampil + timing tiap babak (§23a: caption
+// impor SRT masuk trek subtitle dgn timing PERSIS sesuai file — jadi babak tanpa
+// teks_tampil dilewati, bukan diisi baris kosong).
+function buildSrt(bp) {
+  let t = 0, idx = 0;
+  const blocks = [];
+  bp.babak.forEach(b => {
+    const t0 = t, t1 = t + b.durasi_detik;
+    t = t1;
+    if (!b.teks_tampil) return;
+    idx++;
+    blocks.push(`${idx}\n${fmtSrtTs(t0)} --> ${fmtSrtTs(t1)}\n${b.teks_tampil}\n`);
+  });
+  return blocks.join("\n");
 }
 
 function download(filename, content, mime) {
@@ -563,6 +640,7 @@ function openHistoryItem(id) {
   document.getElementById("f-instruksi").value = item.instruksiUmum || "";
   document.getElementById("f-musik").value = item.musikGenre || "Tidak pakai musik";
   document.getElementById("f-storyline").checked = !!item.storyline;
+  document.getElementById("f-subtitle-method").value = item.subtitleMethod || "Manual per-babak (in-app)";
   babakRows = item.babakRows;
   renderBabakForm();
   showOutput(item.blueprint, item.recipe);
@@ -575,6 +653,16 @@ function showOutput(bp, recipeMd) {
   document.getElementById("output-section").hidden = false;
   window.__lastBlueprint = bp;
   window.__lastRecipe = recipeMd;
+
+  const srt = buildSrt(bp);
+  window.__lastSrt = srt;
+  const srtCard = document.getElementById("srt-card");
+  if (srt) {
+    document.getElementById("out-srt").textContent = srt;
+    srtCard.hidden = false;
+  } else {
+    srtCard.hidden = true;
+  }
 }
 
 function onGenerate(e) {
@@ -586,7 +674,8 @@ function onGenerate(e) {
     rasio: document.getElementById("f-rasio").value,
     instruksiUmum: document.getElementById("f-instruksi").value.trim(),
     musikGenre: document.getElementById("f-musik").value,
-    storyline: document.getElementById("f-storyline").checked
+    storyline: document.getElementById("f-storyline").checked,
+    subtitleMethod: document.getElementById("f-subtitle-method").value
   };
   if (!babakRows.length) { alert("Tambahkan minimal 1 babak dulu."); return; }
 
@@ -597,7 +686,7 @@ function onGenerate(e) {
   const list = loadHistory();
   list.unshift({
     id: uid(), proyek: meta.proyek, klien: meta.klien, rasio: meta.rasio, instruksiUmum: meta.instruksiUmum,
-    musikGenre: meta.musikGenre, storyline: meta.storyline,
+    musikGenre: meta.musikGenre, storyline: meta.storyline, subtitleMethod: meta.subtitleMethod,
     dibuat: new Date().toISOString(), babakCount: babakRows.length,
     babakRows: JSON.parse(JSON.stringify(babakRows)), blueprint: bp, recipe
   });
@@ -628,6 +717,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("btn-dl-md").addEventListener("click", () => {
     if (!window.__lastRecipe) return;
     download(`${slugify(window.__lastBlueprint.proyek)}.vn-recipe.md`, window.__lastRecipe, "text/markdown");
+  });
+  document.getElementById("btn-dl-srt").addEventListener("click", () => {
+    if (!window.__lastSrt) return;
+    download(`${slugify(window.__lastBlueprint.proyek)}.srt`, window.__lastSrt, "text/plain");
   });
   document.getElementById("btn-copy-md").addEventListener("click", async () => {
     if (!window.__lastRecipe) return;

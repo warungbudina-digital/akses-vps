@@ -218,13 +218,36 @@ const VN_CATALOG = {
   freezeFrame: {
     selector: "editor_toolbar_freezeFrame",
     gating: "unclear",
-    catatan: "⚠️ DOKUMENTASI BERTENTANGAN: §8e (2026-07-28) menyimpulkan freeze frame TIDAK ADA sebagai " +
-      "fitur diskrit di build ini setelah penelusuran menyeluruh; tapi §27c (2026-08-13, RN7) mencatat " +
-      "content-desc editor_toolbar_freezeFrame ADA di inventaris toolbar. Sama pola dgn kasus Speed " +
-      "(§8e vs §21g) — kemungkinan feature-flag per akun/versi. CEK LANGSUNG DI DEVICE TUJUAN, jangan asumsi."
+    catatan: "⚠️ DOKUMENTASI BERTENTANGAN: §8e (2026-07-28, Infinix) menyimpulkan freeze frame TIDAK ADA " +
+      "sebagai fitur diskrit setelah penelusuran menyeluruh; tapi §27c DAN temuan terpisah 'BONUS toolbar " +
+      "late RN7 MOD' (2026-08-13/16, RN7) DUA-DUANYA mencatat content-desc editor_toolbar_freezeFrame ADA " +
+      "di inventaris toolbar. Pola sama dgn kasus Speed (§8e vs §21g) — kemungkinan beda per akun/build/" +
+      "device (Infinix vs RN7 MOD), bukan cuma 1 sesi keliru. CEK LANGSUNG DI DEVICE TUJUAN, jangan asumsi."
   },
 
-  // ---- Teks — detail warna/format/ukuran, §27b/§27i ----
+  // ---- Subtitle/caption — 2 JALUR BERBEDA, §8d/§23a/§27b ----
+  subtitle: {
+    selector: "editor_track_subtitle_add (trek T+ di rail-kanan, sheet 'Insert')",
+    catatan: "Sheet Insert selalu tampil 2 opsi: Text (manual) dan SRT Files (impor). " +
+      "Keduanya menulis ke trek subtitle YANG SAMA — bisa dicampur (sebagian manual, sebagian impor).",
+    manual: {
+      selector: "flAddSubtitle",
+      gating: "free",
+      catatan: "Buka picker template teks (lihat VN_CATALOG.textStyle) → ketik isi teks langsung di keyboard."
+    },
+    importSrt: {
+      selector: "flAddAddSubtitlesFormSRT",
+      gating: "free",
+      catatan: "Alur: ketuk baris trek subtitle (tanpa klip terpilih) → popup rlAddTextMenu → " +
+        "'SRT Files' → dialog 'Impor File SRT' → tvFile 'Impor dari Aplikasi File' → SAF picker " +
+        "(com.google.android.documentsui) → file .srt muncul di 'FILE TERBARU' kalau sudah di-push " +
+        "ke /sdcard/Download/ (untuk otomasi: adb push lalu `am broadcast` MEDIA_SCANNER_SCAN_FILE " +
+        "supaya ke-index). Hasil: caption+timing dari SRT langsung masuk trek, total_textView " +
+        "proyek ikut meluas mengikuti durasi SRT."
+    }
+  },
+
+  // ---- Teks — detail warna/format/ukuran/font/layer, §27b/§27i ----
   textColor: {
     selector: "roda-warna in-keyboard",
     gating: "free",
@@ -243,6 +266,27 @@ const VN_CATALOG = {
     selector: "editor_toolbar_textFontSize (AA)",
     gating: "free",
     pilihan: ["Tidak diubah", "Title (36)", "Subtitle (28)", "Content (24)", "Kustom"]
+  },
+  textFont: {
+    selector: "editor_toolbar_textFont (Ff, in-keyboard) / editor_toolbar_textFont (klip terpilih)",
+    gating: "flag",
+    catatan: "Search Font (bawaan) + 'Add font' (impor lokal) = free. Dropdown 'Brand Kit' " +
+      "di panel yang sama = LOGIN-GATED (Pro), tampil 'No styles available' kalau belum login."
+  },
+  textSpacing: {
+    selector: "editor_toolbar_textSpacing (ikon spasi, in-keyboard)",
+    gating: "free",
+    catatan: "Letter/line spacing — nilai slider belum dienum detail di dokumentasi, tulis kebutuhan sbg catatan."
+  },
+  blendMode: {
+    selector: "editor_toolbar_blendMode",
+    gating: "free",
+    catatan: "Mode blend klip teks/overlay terhadap layer di bawahnya — daftar mode belum dienum di dokumentasi, cek live lalu tulis kebutuhan."
+  },
+  layerPosition: {
+    selector: "editor_toolbar_layerPosition",
+    gating: "free",
+    catatan: "Urutan Z (depan/belakang) antar-layer teks/overlay — kontrol pasti belum dienum di dokumentasi, cek live."
   },
 
   // ---- Project-level: musik latar & storyline — §Musik, §8g ----
