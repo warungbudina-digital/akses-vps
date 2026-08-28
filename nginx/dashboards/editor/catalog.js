@@ -3,14 +3,15 @@
 // Label di sini SENGAJA sama persis dengan yang tampil di UI VN, supaya .vn-recipe.md
 // bisa dibaca apa-adanya sebagai instruksi tap-per-tap oleh editor manusia.
 //
-// gating: "free"   = client-side, tanpa login/kredit, aman dipakai kapan saja.
-//         "pro"    = sebagian/seluruh item butuh akun VN Pro (👑) — cek dulu sebelum pakai.
-//         "credit" = AI generatif server-side, dipotong dari saldo kredit VN (mis. Zoom In=75).
-//         "flag"   = ketersediaan tool ITU SENDIRI tergantung status akun (bukan cuma item di dalamnya).
+// gating: "free"    = client-side, tanpa login/kredit, aman dipakai kapan saja.
+//         "pro"     = sebagian/seluruh item butuh akun VN Pro (👑) — cek dulu sebelum pakai.
+//         "credit"  = AI generatif server-side, dipotong dari saldo kredit VN (mis. Zoom In=75).
+//         "flag"    = ketersediaan tool ITU SENDIRI tergantung status akun (bukan cuma item di dalamnya).
+//         "unclear" = dokumentasi belum tuntas/bertentangan antar-sesi — WAJIB cek live sebelum pakai.
 
 const VN_CATALOG = {
   meta: {
-    sumber: "tool-appium/docs/vn-automation-map.md §8, §20-21, §27, §29",
+    sumber: "tool-appium/docs/vn-automation-map.md §8 (termasuk sub-Musik), §8a-8h, §13-15, §20-21, §27, §29",
     versi_vn: "2.17.0 (versionCode 6989)",
     catatan: "Speed (editor_toolbar_speed) pernah tercatat TIDAK ADA sama sekali pada akun " +
       "tamu/non-login (§8e), lalu TERBUKTI ADA pada akun login+VN Pro (§21g). Verifikasi " +
@@ -115,6 +116,147 @@ const VN_CATALOG = {
     catatan: "TIDAK ADA panel preset in/out/loop di build ini (§27i). Satu-satunya jalur animasi " +
       "kustom = Keyframe ◇ (posisi/skala/rotasi/opacity) manual per titik waktu — tulis sebagai " +
       "instruksi bebas di field 'catatan animasi', bukan dropdown."
+  },
+
+  // ---- Footage-prep (struktur klip) — §8h, §21h/§28a ----
+  trim: {
+    selector: "etTotalRangeTimeS (VideoTrimActivity)",
+    gating: "free",
+    pilihan: ["Tidak diubah", "Asli", "0.1s", "0.3s", "1s", "2.5s", "Kustom (ketik manual)"]
+  },
+  crop: {
+    selector: "editor_toolbar_crop (buka CropActivity)",
+    gating: "free",
+    pilihan: ["Tidak diubah", "Asli", "Bebas", "9:16", "1:1", "16:9"]
+  },
+  rotateFlipFill: {
+    selector: "editor_toolbar_rotate / flipHorizontal / flipVertical / fill (tanpa content-desc)",
+    gating: "free",
+    catatan: "Semua AKSI INSTAN tanpa panel (langsung ketuk, tak ada pilihan lanjutan). Rotate " +
+      "+90° tiap ketuk memicu panel Background otomatis (area kosong). fill = toggle Mengisi(Fill)/Cocok(Fit)."
+  },
+
+  // ---- Komposisi & efek gambar — §8f/§8g ----
+  background: {
+    selector: "editor_toolbar_background",
+    gating: "free",
+    catatan: "Dipakai utk latar saat klip tak memenuhi frame (manual, atau otomatis muncul pasca-Rotate).",
+    tabs: ["Gambar", "Warna", "Gradien"]
+  },
+  mask: {
+    selector: "editor_toolbar_mask",
+    gating: "free",
+    catatan: "Ada di toolbar (§27c) tapi jenis mask belum dienum detail di dokumentasi — cek live di device sebelum eksekusi."
+  },
+  mosaic: {
+    selector: "editor_toolbar_mosaic",
+    gating: "free",
+    pilihan: ["Tidak dipakai", "Mosaik", "Segitiga", "Segi enam", "Blur"],
+    size: { selector: "sbSize", default: 20 }
+  },
+  magnifier: {
+    selector: "editor_toolbar_magnifier",
+    gating: "free",
+    pilihan: ["Tidak dipakai", "Bulat", "Persegi 1", "Persegi 2", "Gaya 1", "Gaya 2"],
+    zoom: { selector: "sbZoom", default: 25 },
+    border: { selector: "sbBorder", default: 40 }
+  },
+  imageBorder: {
+    selector: "editor_toolbar_imageBorder",
+    gating: "free",
+    label_ui: "Berbatasan",
+    width: { selector: "sbBorderWidth", default: 0 }
+  },
+  imageBlur: {
+    selector: "editor_toolbar_imageBlur",
+    gating: "free",
+    pilihan: ["Tidak dipakai", "Dasar", "Horizontal", "Vertikal", "Radioaktif"],
+    intensity: { selector: "sbBlur/etBlurSize", default: 30, satuan: "%" }
+  },
+  alpha: {
+    selector: "editor_toolbar_alpha",
+    gating: "free",
+    label_ui: "Kegelapan",
+    default: 100
+  },
+  overlayPiP: {
+    selector: "editor_toolbar_toPiP",
+    gating: "free",
+    catatan: "Mengetuknya TIDAK membuka panel — langsung memindahkan klip terpilih ke trek overlay/PiP baru (posisi/skala diatur via gestur di pratinjau)."
+  },
+
+  // ---- Elements / Stiker — §27k ----
+  elements: {
+    selector: "editor_track_sticker_add (sheet Insert -> Elements)",
+    tabs: ["Elements", "Imports", "Favorites"],
+    graphics: {
+      gating: "free",
+      catatan: "Client-side instan. Item ber-crown 👑 di kategori Social = Pro-gated, skip.",
+      kategori: ["Shapes (36)", "Lines & Frames (323)", "Social Media Logo (77)", "Social (275, sebagian 👑)"]
+    },
+    frames: {
+      gating: "free",
+      catatan: "Cloud tapi berhasil load (~5s) tanpa login — beda dari musik cloud yang gagal.",
+      kategori: ["Basic (16)", "Shapes (24)", "Square (40)", "Circle (27)"]
+    }
+  },
+
+  // ---- Audio klip — §27c ----
+  audio: {
+    volume: { selector: "editor_toolbar_volume (=volumeFade)", gating: "free", catatan: "Volume + fade in/out, tanpa preset diskrit — tulis kebutuhan sbg catatan." },
+    denoise: { selector: "editor_toolbar_denoise", gating: "free" },
+    extractAudio: { selector: "editor_toolbar_extractAudio", gating: "free" },
+    reverse: { selector: "editor_toolbar_reverse", gating: "free", catatan: "Aksi instan, balik arah putar klip." }
+  },
+
+  // ---- Gated / status tak pasti — WAJIB diverifikasi live sebelum eksekusi ----
+  autoCaption: {
+    selector: "editor_toolbar_autoCaption",
+    gating: "unclear",
+    catatan: "Kemungkinan server-gated (§27f), belum tuntas diuji. Jangan andalkan di eksekusi otonom sampai diverifikasi."
+  },
+  freezeFrame: {
+    selector: "editor_toolbar_freezeFrame",
+    gating: "unclear",
+    catatan: "⚠️ DOKUMENTASI BERTENTANGAN: §8e (2026-07-28) menyimpulkan freeze frame TIDAK ADA sebagai " +
+      "fitur diskrit di build ini setelah penelusuran menyeluruh; tapi §27c (2026-08-13, RN7) mencatat " +
+      "content-desc editor_toolbar_freezeFrame ADA di inventaris toolbar. Sama pola dgn kasus Speed " +
+      "(§8e vs §21g) — kemungkinan feature-flag per akun/versi. CEK LANGSUNG DI DEVICE TUJUAN, jangan asumsi."
+  },
+
+  // ---- Teks — detail warna/format/ukuran, §27b/§27i ----
+  textColor: {
+    selector: "roda-warna in-keyboard",
+    gating: "free",
+    target: ["Text", "Stroke", "Shadow", "Background"],
+    catatan: "4 target warna terpisah + opacity per-target. Tulis warna yang diinginkan sbg catatan bebas (mis. kode hex) — picker tak bisa diwakili dropdown."
+  },
+  textFormat: {
+    selector: "editor_toolbar_textFormat (A≡)",
+    gating: "free",
+    listStyle: ["Tidak ada", "Bullet", "Nomor"],
+    boldItalic: ["Bold", "Italic"],
+    alignment: ["Kiri", "Tengah", "Kanan"],
+    caseOption: ["Tidak diubah", "AG (kapital semua)", "Ag (kapital awal)", "ag (huruf kecil semua)"]
+  },
+  textSize: {
+    selector: "editor_toolbar_textFontSize (AA)",
+    gating: "free",
+    pilihan: ["Tidak diubah", "Title (36)", "Subtitle (28)", "Content (24)", "Kustom"]
+  },
+
+  // ---- Project-level: musik latar & storyline — §Musik, §8g ----
+  musik: {
+    selector: "editor_track_music_add (MusicManageActivity)",
+    gating: "free",
+    catatan: "Tab Musik (katalog bawaan)/Favorit/Milikmu (file sendiri). Katalog cloud kadang 'Loading failed' — siapkan file sendiri sbg cadangan.",
+    genre: ["Tidak pakai musik", "Vlog", "Pop", "Dynamic", "Fresh", "Acoustic", "Electronic", "Hip-Hop", "File sendiri (tab Milikmu)"]
+  },
+  storyline: {
+    selector: "editor_toolbar_story (buka StorylineComposeActivity penuh)",
+    gating: "free",
+    catatan: "Composer storyboard terpisah: per-klip ada deskripsi teks (etMediaDescription) + toggle " +
+      "'judul sebagai transisi'. Berguna sbg bahan narasi/AI, BUKAN wajib utk hasil edit akhir."
   }
 };
 
