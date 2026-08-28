@@ -42,6 +42,9 @@ pentest-grpc-server/proto/gen/
 pentest-grpc-server/bin/
 nginx/dashboards/*/index.html
 viral-pipeline/dashboard.html
+# Output reproduksi VN per-job (ir_to_vn.py, dibuat otomatis oleh
+# orchestrator.py sejak 2026-08-28) -- data hasil run, bukan kode.
+viral-pipeline/reproductions/
 
 # Go
 *.exe

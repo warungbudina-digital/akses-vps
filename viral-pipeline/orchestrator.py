@@ -24,6 +24,12 @@ ANALYZER    = "http://127.0.0.1:9021"
 COOKIES     = {"youtube":"yt-cookies.txt", "facebook":"fb-cookies.txt", "instagram":"ig-cookies.txt"}
 MAX_JOBS    = int(os.getenv("MAX_JOBS", "0"))
 ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "1200"))  # detik; whisper CPU (V2) utk video panjang bisa >5mnt
+# (2026-08-28) opsi 3 permintaan user: sambungkan ir_to_vn.py ke drain
+# otomatis, supaya tiap analisa SEKALIAN hasilkan cetak-biru reproduksi VN
+# (termasuk .story-script.md, WAJIB per SOP lama -- lihat memori
+# feedback_ir_to_vn_story_script) TANPA langkah manual lagi.
+IR_TO_VN    = os.path.expanduser("~/viral-pipeline/ir_to_vn.py")   # jalan LOKAL di akses-vps
+REPRO_DIR   = os.path.expanduser("~/viral-pipeline/reproductions")  # <dir>/job-<id>/job-<id>.*
 # (2026-08-28) celah #3 audit otomatisasi: job yg gagal permanen ('dead' stlh
 # max_attempts habis) dulu diam total di DB, tak ada yg tahu kecuali cek
 # manual -- beda dgn wake-orchestrator.sh yg SELALU notify Telegram. Fix:
@@ -174,6 +180,32 @@ def write_result(job, data):
         return f"tulis hasil gagal: {r.stderr.strip()[:300]}"
     return None
 
+def build_reproduction(job, analysis):
+    """Panggil ir_to_vn.py LOKAL (akses-vps) supaya tiap job SEKALIAN
+    hasilkan cetak-biru reproduksi VN (.srt/.vn-blueprint.json/.cutlist.txt/
+    .vn-recipe.md/.segments.json/.story-script.md) -- bukan cuma tersimpan
+    di DB. Best-effort: job SUDAH 'analyzed' di DB sebelum fungsi ini
+    dipanggil (lihat main()) -- kalau ir_to_vn.py gagal (mis. IR versi lama
+    kurang field), itu TAK BOLEH menggagalkan job yg sudah sukses, cuma
+    log peringatan & job kehilangan bonus reproduksi kali ini saja."""
+    jid = job["id"]
+    outdir = os.path.join(REPRO_DIR, f"job-{jid}")
+    base = os.path.join(outdir, f"job-{jid}")
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        with open(base + ".ir.json", "w", encoding="utf-8") as f:
+            json.dump(analysis, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"  (build_reproduction: gagal tulis IR lokal, dilewati):", repr(e)[:150])
+        return None
+    r = sh(["python3", IR_TO_VN, base + ".ir.json", "--out", base], timeout=60)
+    if r.returncode != 0:
+        log(f"  (ir_to_vn.py gagal utk job {jid}, analisa TETAP tersimpan di DB, cuma bonus reproduksi dilewati):",
+            (r.stderr or r.stdout or "").strip()[:250])
+        return None
+    log(f"  reproduksi VN (story-script + blueprint) tersimpan: {outdir}/")
+    return outdir
+
 def cleanup(jid):
     ssh_db(f"rm -f {DBVPS_WORK}/job-{jid}.*")
     ssh_c50(f"rm -f {C50_INPUT}/job-{jid}.*")
@@ -201,6 +233,7 @@ def main():
             werr = write_result(job, data)
             if werr:
                 log("  x write:", werr); fail_job(job, werr); cleanup(job["id"]); fail += 1; continue
+            build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
             cleanup(job["id"])
             ok += 1
             sc = len(data["analysis"].get("scene_analysis", []))
