@@ -2,7 +2,8 @@
 # =====================================================================
 # wake-orchestrator.sh — JALUR UTAMA pasca-wake laptop SUARAHATI.
 # Dijalankan DI HUB (akses-vps, 24/7) lewat cron, beberapa menit setelah
-# jadwal RTC-wake laptop (NodeWake-0845, lihat project_laptop_wol_power).
+# jadwal RTC-wake laptop (NodeWake-0600 / NodeWake2-1500, lihat
+# project_laptop_wol_power).
 #
 # ALUR BERTAHAP KETAT (permintaan user 2026-08-16): satu profil selesai
 # TUNTAS (bootstrap WG+SSH -> deploy project -> SEHAT terverifikasi)
@@ -10,25 +11,29 @@
 # tak lagi kewalahan buka 3 tab Cloud Shell berat sekaligus (akar
 # masalah kegagalan berulang sebelumnya).
 #
-# KEBIJAKAN GAGAL (direvisi 2026-08-24) = SEQUENTIAL + BERHENTI BERSYARAT,
-# dibedakan berdasar TAHAP kegagalan -- bukan lagi "sekali gagal, semua
-# berhenti" polos:
-#   - HARD-FAIL (trigger task open-cs-<profil> gagal / laptop tak kunjung
-#     lapor selesai bootstrap dlm batas waktu): profil berikutnya TIDAK
-#     dicoba, skrip berhenti total. Alasan: kegagalan di tahap INI berarti
-#     laptop (CPU lemah) sendiri sedang bermasalah/kewalahan -- menambah
-#     beban buka tab lagi cuma bikin kegagalan beruntun.
+# URUTAN PROFIL (direvisi 2026-08-28, permintaan user):
+# balibruntattour -> gogobuda -> yuni (dulu yuni dulu, kini TERAKHIR).
+#
+# KEBIJAKAN GAGAL (direvisi 2026-08-28 v5 — "jalankan hingga berhasil",
+# kebijakan retry KONSERVATIF, permintaan user):
 #   - SOFT-FAIL (bootstrap laptop SUDAH selesai/sukses, tapi node Cloud
 #     Shell tak kunjung reachable ATAU deploy_<profil> gagal/tak sehat):
-#     profil berikutnya TETAP DICOBA. Alasan: di tahap ini laptop sudah
-#     tuntas bagiannya (tab sudah terbuka & idle) -- kegagalannya murni
-#     di sisi cloud (VM/deploy), tak ada risiko tambahan beban ke laptop
-#     kalau lanjut buka tab profil berikutnya.
-# Kejadian nyata yg memicu revisi ini (2026-08-24): yuni SUKSES bootstrap
-# di laptop, tapi deploy-nya kalah race lock 27 detik lawan cron
-# cs-auto-deploy.sh (lihat lib-cs-deploy.sh) -> dulu ini bikin
-# balibruntattour+gogobuda ikut TAK PERNAH dicoba padahal tak ada
-# hubungannya sama sekali dgn kondisi laptop.
+#     TAK di-retry di sini (sudah ditangani jaring pengaman
+#     cs-auto-deploy.sh tiap 5mnt sepanjang jendela wake) -- langsung
+#     lanjut ke profil berikutnya.
+#   - HARD-FAIL (trigger task open-cs-<profil> gagal / laptop tak kunjung
+#     lapor selesai bootstrap dlm batas waktu, mis. "prompt Cloud Shell
+#     belum siap dlm 180 detik" -- pola paling sering, TERBUKTI 2026-08-27
+#     ini murni Google Cloud Shell lambat provisioning, BUKAN eksklusif
+#     satu akun/laptop kewalahan): kini DI-RETRY otomatis sampai
+#     MAX_RETRIES kali (jeda RETRY_WAIT_SEC per percobaan) SEBELUM
+#     menyerah -- meniru teknik pemulihan manual yg terbukti jalan
+#     2026-08-27 (tab yg "gagal" tetap terbuka & sering jadi siap sendiri
+#     ~25 menit kemudian, cukup schtasks/run ulang, TANPA buka tab baru).
+#     Setelah retry habis, profil ini ditandai gagal TAPI TETAP LANJUT ke
+#     profil berikutnya (BUKAN lagi berhenti total spt kebijakan lama) --
+#     krn pola kegagalan ini terbukti bisa kena akun MANAPUN scr acak,
+#     bukan sinyal laptop rusak yg mengharuskan berhenti total.
 #
 # TIAP PROFIL cuma dianggap SELESAI kalau tahap deploy-nya SEHAT PENUH
 # (healthz/health returns true, BUKAN cuma "container ada") -- fungsi
@@ -41,14 +46,23 @@
 #   - Task lama `open-cs` (buka 3 sekaligus) auto-trigger-nya DICABUT,
 #     tapi tasknya tetap ada utk fallback manual/darurat kalau perlu.
 #
-# Exit code: 0 = SEMUA 3 profil selesai sehat. 1 = berhenti di tengah
-# (lihat log utk tahu di profil mana & kenapa).
+# Exit code: 0 = SEMUA 3 profil selesai sehat. 1 = ada yg tak sehat
+# (lihat log utk tahu profil mana & kenapa -- skrip tetap mencoba
+# SEMUA profil sampai akhir, tak lagi berhenti di tengah).
 # =====================================================================
 set -uo pipefail
 
 LOCK="$HOME/.wake-orchestrator.lock"
 LOG="$HOME/wake-orchestrator.log"
-STATE_LOG="$HOME/ltap-mini-open-cs.log-snapshot"  # snapshot open-cs.log laptop, per-profil
+
+# Kebijakan retry KONSERVATIF (permintaan user 2026-08-28): tiap profil
+# yg HARD-FAIL dicoba ulang maks MAX_RETRIES kali TAMBAHAN (jadi total
+# 1+MAX_RETRIES percobaan), jeda RETRY_WAIT_SEC antar-percobaan. Dipilih
+# nilai hemat CPU/lalu-lintas (bukan agresif) supaya tak menambah beban
+# ke laptop lemah & tak memicu kecurigaan rate-limit Google Cloud Shell
+# (pernah tercatat sbg risiko kalau retry manual dibuka-tutup beruntun).
+MAX_RETRIES=2
+RETRY_WAIT_SEC=600  # 10 menit
 
 exec 201>"$LOCK"
 flock -n 201 || { echo "[wake-orch $(date -u +%H:%M:%S)Z] sudah berjalan (lock) - skip." >> "$LOG"; exit 0; }
@@ -84,7 +98,7 @@ if ! timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/
   exit 0
 fi
 rm -f "$STATE"
-log "laptop terjangkau -> mulai alur bertahap 3 profil."
+log "laptop terjangkau -> mulai alur bertahap 3 profil (urutan: balibruntattour -> gogobuda -> yuni)."
 
 # open_cs_profile <task-name-suffix> -> trigger task open-cs-<X> di laptop
 # via schtasks/run (InteractiveToken, WAJIB lewat Scheduled Task -- SSH
@@ -154,9 +168,11 @@ wait_wg_reachable() {
 # process_profile <nama> <host-ssh> <fungsi-deploy> <batas-bootstrap> <batas-reachable>
 # Return 0 = profil ini TUNTAS SEHAT.
 #        1 = SOFT-FAIL (gagal di tahap reachable/deploy -- laptop SUDAH
-#            beres bagiannya; pemanggil aman lanjut ke profil berikutnya).
-#        2 = HARD-FAIL (gagal di tahap trigger/bootstrap -- laptop sendiri
-#            lagi bermasalah; pemanggil WAJIB berhenti total).
+#            beres bagiannya; pemanggil aman lanjut ke profil berikutnya,
+#            jaring pengaman cs-auto-deploy.sh akan terus coba lagi).
+#        2 = HARD-FAIL (gagal di tahap trigger/bootstrap -- laptop belum
+#            beres bagiannya SEKALI INI; pemanggil (retry wrapper) yg
+#            memutuskan retry atau menyerah).
 process_profile() {
   local name="$1" host="$2" deploy_fn="$3" bs_limit="$4" reach_limit="$5"
 
@@ -196,68 +212,84 @@ process_profile() {
   return 0
 }
 
+# process_profile_with_retry — bungkus process_profile() dgn retry KHUSUS
+# utk HARD-FAIL (rc=2). SOFT-FAIL (rc=1) TAK di-retry di sini (sudah jadi
+# tanggung jawab cs-auto-deploy.sh sepanjang jendela wake). Kebijakan
+# "jalankan hingga berhasil" (permintaan user 2026-08-28) -- tapi
+# dibatasi (konservatif) supaya tak retry tanpa henti: maks MAX_RETRIES
+# percobaan tambahan, jeda RETRY_WAIT_SEC. Return code sama persis dgn
+# process_profile (0/1/2), tinggal rc=2 di sini berarti "sudah dicoba
+# berkali-kali & tetap gagal", bukan lagi "baru dicoba sekali".
+process_profile_with_retry() {
+  local name="$1" host="$2" deploy_fn="$3" bs_limit="$4" reach_limit="$5"
+  local attempt=1 rc total_attempts=$((MAX_RETRIES + 1))
+
+  while :; do
+    process_profile "$name" "$host" "$deploy_fn" "$bs_limit" "$reach_limit"
+    rc=$?
+    if [ "$rc" -ne 2 ]; then
+      return "$rc"   # sukses (0) atau soft-fail (1) -- tak perlu retry di sini
+    fi
+    if [ "$attempt" -ge "$total_attempts" ]; then
+      log "$name: MENYERAH setelah $attempt percobaan (kebijakan retry konservatif: maks $total_attempts percobaan, jeda ${RETRY_WAIT_SEC}s) -- LANJUT ke profil berikutnya (bukan berhenti total)."
+      return 2
+    fi
+    log "$name: percobaan ke-$attempt gagal (hard) -- tunggu ${RETRY_WAIT_SEC}s lalu retry (percobaan $((attempt + 1))/$total_attempts). Tab yg sudah terbuka biasanya tetap idle & bisa siap sendiri (pola terbukti 2026-08-27)."
+    sleep "$RETRY_WAIT_SEC"
+    attempt=$((attempt + 1))
+  done
+}
+
 # ---------------------------------------------------------------------
-# ALUR UTAMA — sequential, berhenti total HANYA kalau hard-fail (lihat
-# kebijakan di header file). Batas waktu per tahap: bootstrap generous
-# (laptop lemah + Cloud Shell VM cold-start bisa 3-4mnt), reachable
-# pendek (begitu WG up biasanya sshd VM langsung siap), deploy TANPA
-# batas eksternal tambahan di sini (fungsi deploy_* sendiri sudah punya
-# batas internal -- analyzer V2 bisa ~15mnt kalau image belum ada,
-# browser ~6mnt, n8n ~90dtk).
+# ALUR UTAMA — sequential, TAK PERNAH berhenti di tengah lagi (revisi
+# 2026-08-28): tiap profil dicoba (dgn retry kalau hard-fail) lalu SELALU
+# lanjut ke profil berikutnya apa pun hasilnya. Batas waktu per tahap:
+# bootstrap generous (laptop lemah + Cloud Shell VM cold-start bisa
+# 3-4mnt), reachable pendek (begitu WG up biasanya sshd VM langsung
+# siap), deploy TANPA batas eksternal tambahan di sini (fungsi deploy_*
+# sendiri sudah punya batas internal -- analyzer bisa ~15mnt kalau image
+# belum ada, browser ~6mnt, n8n ~90dtk).
 #
-# finish() SELALU dipanggil sebelum exit (jalur sukses PENUH, soft-fail,
-# maupun hard-fail-abort) -- satu baris "=== RINGKASAN AKHIR" jadi
-# SATU-SATUNYA anchor yg dibaca check-wake-pipeline.sh, supaya laporan
-# Telegram tak perlu nebak-nebak dari pola baris "!!! X GAGAL" yg kini
-# bisa muncul lebih dari sekali per run (beda dari desain lama).
+# finish() SELALU dipanggil sebelum exit -- satu baris "=== RINGKASAN
+# AKHIR" jadi SATU-SATUNYA anchor yg dibaca check-wake-pipeline.sh,
+# supaya laporan Telegram tak perlu nebak-nebak dari pola baris "!!! X
+# GAGAL" yg bisa muncul lebih dari sekali per run.
 # ---------------------------------------------------------------------
-STATUS_YUNI="BELUM DICOBA"; STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"
+STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"
 
 finish() {
-  log "=== RINGKASAN AKHIR: yuni=$STATUS_YUNI, balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO ==="
-  if [ "$STATUS_YUNI" = "OK" ] && [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ]; then
-    notify "✅ wake-orchestrator SUKSES PENUH: yuni+balibruntattour+gogobuda semua sehat & jalan."
+  log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI ==="
+  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ]; then
+    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni semua sehat & jalan."
     exit 0
   fi
-  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- yuni=$STATUS_YUNI, balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO. Detail: ~/wake-orchestrator.log (hub)."
+  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI. Detail: ~/wake-orchestrator.log (hub)."
   exit 1
 }
 
-process_profile "yuni" "warungbudina@10.66.66.50" deploy_yuni 240 60
+process_profile_with_retry "balibruntattour" "balibruntattour@10.66.66.60" deploy_balibruntattour 240 60
 rc=$?
-if [ "$rc" -eq 0 ]; then
-  STATUS_YUNI="OK"
-elif [ "$rc" -eq 2 ]; then
-  STATUS_YUNI="GAGAL (hard, bootstrap laptop)"
-  log "BERHENTI TOTAL -- yuni hard-fail (bootstrap laptop bermasalah), balibruntattour & gogobuda TIDAK dicoba."
-  finish
-else
-  STATUS_YUNI="GAGAL (soft, pasca-bootstrap)"
-  log "yuni soft-fail (laptop sudah beres bagiannya) -- LANJUT ke balibruntattour."
-fi
+case "$rc" in
+  0) STATUS_BALI="OK" ;;
+  1) STATUS_BALI="GAGAL (soft, pasca-bootstrap)"; log "balibruntattour soft-fail (laptop sudah beres bagiannya) -- LANJUT ke gogobuda." ;;
+  2) STATUS_BALI="GAGAL (hard, retry habis)"; log "balibruntattour hard-fail setelah semua retry -- LANJUT ke gogobuda (kebijakan baru 2026-08-28: tak lagi berhenti total)." ;;
+esac
 
-process_profile "balibruntattour" "balibruntattour@10.66.66.60" deploy_balibruntattour 240 60
+process_profile_with_retry "gogobuda" "gogobuda65@10.66.66.61" deploy_gogobuda 240 60
 rc=$?
-if [ "$rc" -eq 0 ]; then
-  STATUS_BALI="OK"
-elif [ "$rc" -eq 2 ]; then
-  STATUS_BALI="GAGAL (hard, bootstrap laptop)"
-  log "BERHENTI TOTAL -- balibruntattour hard-fail (bootstrap laptop bermasalah), gogobuda TIDAK dicoba."
-  finish
-else
-  STATUS_BALI="GAGAL (soft, pasca-bootstrap)"
-  log "balibruntattour soft-fail (laptop sudah beres bagiannya) -- LANJUT ke gogobuda."
-fi
+case "$rc" in
+  0) STATUS_GOGO="OK" ;;
+  1) STATUS_GOGO="GAGAL (soft, pasca-bootstrap)"; log "gogobuda soft-fail (laptop sudah beres bagiannya) -- LANJUT ke yuni." ;;
+  2) STATUS_GOGO="GAGAL (hard, retry habis)"; log "gogobuda hard-fail setelah semua retry -- LANJUT ke yuni." ;;
+esac
 
-process_profile "gogobuda" "gogobuda65@10.66.66.61" deploy_gogobuda 240 60
+process_profile_with_retry "yuni" "warungbudina@10.66.66.50" deploy_yuni 240 60
 rc=$?
-if [ "$rc" -eq 0 ]; then
-  STATUS_GOGO="OK"
-elif [ "$rc" -eq 2 ]; then
-  STATUS_GOGO="GAGAL (hard, bootstrap laptop)"
-else
-  STATUS_GOGO="GAGAL (soft, pasca-bootstrap)"
-fi
-log "gogobuda ini profil TERAKHIR -- tak ada lagi yg menyusul."
+case "$rc" in
+  0) STATUS_YUNI="OK" ;;
+  1) STATUS_YUNI="GAGAL (soft, pasca-bootstrap)" ;;
+  2) STATUS_YUNI="GAGAL (hard, retry habis)" ;;
+esac
+log "yuni ini profil TERAKHIR -- tak ada lagi yg menyusul."
 
 finish

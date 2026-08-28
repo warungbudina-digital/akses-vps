@@ -50,7 +50,7 @@ RUN_TS="$(echo "$BLOCK" | head -1 | grep -oE '[0-9]{2}:[0-9]{2}:[0-9]{2}Z' | hea
 
 if echo "$BLOCK" | grep -q "TAK terjangkau -> batal total"; then
   MSG="⚠️ check-wake-pipeline (run ${RUN_TS:-?} UTC): laptop TAK terjangkau -- wake gagal atau masih hibernasi.
-Kalau ini jam kerja (08:30-12:35 / 13:00-22:45 WITA), cek fisik laptop / jadwal RTC-wake.
+Kalau ini jam kerja (06:00-14:00 / 15:00-23:00 WITA), cek fisik laptop / jadwal RTC-wake.
 Detail: $OUT (di akses-vps)"
   log "$MSG"
   "$TG" "$MSG" || log "WARN: kirim Telegram gagal."
@@ -67,8 +67,8 @@ fi
 # ATAU hard-fail-abort) -- satu anchor tunggal, tak perlu nebak lagi.
 RINGKASAN="$(echo "$BLOCK" | grep "=== RINGKASAN AKHIR:" | tail -1)"
 
-if echo "$BLOCK" | grep -q "SEMUA 3 PROFIL TUNTAS SEHAT\|=== RINGKASAN AKHIR: yuni=OK, balibruntattour=OK, gogobuda=OK"; then
-  MSG="✅ check-wake-pipeline (run ${RUN_TS:-?} UTC): SUKSES PENUH -- yuni+balibruntattour+gogobuda semua sehat."
+if echo "$BLOCK" | grep -q "SEMUA 3 PROFIL TUNTAS SEHAT\|=== RINGKASAN AKHIR: balibruntattour=OK, gogobuda=OK, yuni=OK"; then
+  MSG="✅ check-wake-pipeline (run ${RUN_TS:-?} UTC): SUKSES PENUH -- balibruntattour+gogobuda+yuni semua sehat."
   log "$MSG"
   "$TG" "$MSG" || log "WARN: kirim Telegram gagal."
   log "=== selesai ==="

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pre-hibernate-sop.sh — SOP pra-hibernasi laptop SUARAHATI (node terjadwal).
-# Laptop hibernate 22:30 WITA (task NodeHibernate-2230). SOP ini jalan 3 menit
-# sebelumnya = 22:27 WITA (14:27 UTC) via crontab HUB (akses-vps, 24/7).
+# Dipanggil 3 menit sebelum TIAP hibernate/break laptop (v2026-08-28, 2
+# siklus/hari: sblm break 14:00 WITA & sblm hibernate malam 23:00 WITA)
+# via crontab HUB (akses-vps, 24/7) -- jam persis lihat crontab & docs/17.
 #
 # Urutan (permintaan user): matikan container running -> hentikan ping ->
 # tutup tab & browser (Chrome) di laptop.

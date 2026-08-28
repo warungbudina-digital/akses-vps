@@ -35,22 +35,30 @@ Cloud Shell BARU (bukan lanjutan sesi lama) → project (terutama
 analyzer yuni, ~13-15mnt kalau build dari nol) **bisa ke-build ulang
 2×/hari**. Ini KONSEKUENSI YANG DITERIMA (keputusan user), bukan bug.
 
+**✅ 2026-08-28 (v3): jam digeser total** (permintaan user — mulai lebih
+pagi, istirahat siang lebih panjang). Wake1 08:30→**06:00**, Break
+12:35→**14:00**, Wake2 13:00→**15:05** (sengaja +5mnt dari rencana awal
+15:00 — rollout dieksekusi PAS lewat jam 15:00, digenapkan buffer),
+Hibernate 22:45→**23:00**. Task Windows di-rename total (lihat §6).
+
 | Jam WITA | Jam UTC | Kejadian | Dikendalikan dari |
 |---|---|---|---|
-| **08:30** | 00:30 | Laptop **wake #1** (RTC, task `NodeWake-0830`) | Laptop (Task Scheduler lokal) |
-| 08:30:20 | 00:30:20 | `ensure-chrome-cdp` pastikan Chrome+CDP hidup (trigger event-wake, otomatis di KEDUA wake) | Laptop |
-| **08:33** | **00:33** | **`wake-orchestrator.sh` mulai** — alur bertahap 3 profil (§3) | **HUB (cron)** |
-| 08:30–12:35 | 00:30–04:35 | `cs-auto-deploy.sh` jalan tiap 5 menit sbg **jaring pengaman** (§4) | HUB (cron) |
-| **12:32** | **04:32** | `pre-hibernate-sop.sh` — stop container node + tutup Chrome laptop dgn rapi (§5) | HUB (cron) |
-| **12:35** | **04:35** | Laptop **break/hibernate #1** (task `NodeBreak-1235`) | Laptop (Task Scheduler lokal) |
-| 12:35–13:00 | 04:35–05:00 | **Jeda istirahat 25 menit** — laptop tidur, semua no-op wajar | — |
-| **13:00** | **05:00** | Laptop **wake #2** (RTC, task `NodeWake2-1300`) | Laptop (Task Scheduler lokal) |
-| **13:03** | **05:03** | **`wake-orchestrator.sh` mulai lagi** — alur bertahap 3 profil dari nol (VM baru) | **HUB (cron)** |
-| 13:00–22:45 | 05:00–14:45 | `cs-auto-deploy.sh` jaring pengaman lanjut | HUB (cron) |
-| **22:42** | **14:42** | `pre-hibernate-sop.sh` — penutupan malam | HUB (cron) |
-| **22:45** | **14:45** | Laptop **hibernate total** (task `NodeHibernate-2245`) | Laptop (Task Scheduler lokal) |
+| **06:00** | 22:00 (h-1) | Laptop **wake #1** (RTC, task `NodeWake-0600`) | Laptop (Task Scheduler lokal) |
+| 06:00:20 | 22:00:20 (h-1) | `ensure-chrome-cdp` pastikan Chrome+CDP hidup (trigger event-wake, otomatis di KEDUA wake) | Laptop |
+| **06:03** | **22:03 (h-1)** | **`wake-orchestrator.sh` mulai** — alur bertahap 3 profil, urutan balibruntattour→gogobuda→yuni (§3) | **HUB (cron)** |
+| 06:00–14:00 | 22:00 (h-1)–06:00 | `cs-auto-deploy.sh` jalan tiap 5 menit sbg **jaring pengaman** (§4) | HUB (cron) |
+| **13:57** | **05:57** | `pre-hibernate-sop.sh` — stop container node + tutup Chrome laptop dgn rapi (§5) | HUB (cron) |
+| **14:00** | **06:00** | Laptop **break/hibernate #1** (task `NodeBreak-1400`) | Laptop (Task Scheduler lokal) |
+| 14:00–15:05 | 06:00–07:05 | **Jeda istirahat ~1 jam** — laptop tidur, semua no-op wajar | — |
+| **15:05** | **07:05** | Laptop **wake #2** (RTC, task `NodeWake2-1505`) | Laptop (Task Scheduler lokal) |
+| **15:08** | **07:08** | **`wake-orchestrator.sh` mulai lagi** — alur bertahap 3 profil dari nol (VM baru) | **HUB (cron)** |
+| 15:05–23:00 | 07:05–15:00 | `cs-auto-deploy.sh` jaring pengaman lanjut | HUB (cron) |
+| **22:57** | **14:57** | `pre-hibernate-sop.sh` — penutupan malam | HUB (cron) |
+| **23:00** | **15:00** | Laptop **hibernate total** (task `NodeHibernate-2300`) | Laptop (Task Scheduler lokal) |
 
 Siklus ini berulang tiap hari (`DaysInterval=1` di keempat task Windows).
+Jadwal lama (v2, 08:30/12:35/13:00/22:45) ada di riwayat §8 kalau perlu
+rollback.
 
 **Prinsip kunci:** laptop TAK PERNAH mengambil keputusan sendiri soal
 "buka profil mana, deploy apa" — itu semua diperintah dari **HUB**
@@ -61,8 +69,9 @@ bukan di Windows Task Scheduler yang kaku.
 
 ## 3. Alur wake bertahap (`wake-orchestrator.sh`, di HUB)
 
-Untuk **tiap profil, berurutan** (yuni dulu, baru balibruntattour, baru
-gogobuda — urutan ini TETAP, tak berubah):
+Untuk **tiap profil, berurutan** (**balibruntattour dulu, baru gogobuda,
+baru yuni TERAKHIR** — urutan direvisi 2026-08-28 v5, permintaan user;
+dulu yuni dulu):
 
 ```
 1. HUB kirim perintah "buka profil ini" ke laptop
@@ -103,12 +112,16 @@ gogobuda — urutan ini TETAP, tak berubah):
         ▼
 7a. SEHAT → lanjut ke profil berikutnya (ulang dari langkah 1)     ATAU
 7b. GAGAL di tahap 2-3 (trigger/bootstrap, laptop BELUM beres
-    bagiannya) → HARD-FAIL, BERHENTI TOTAL. Profil berikutnya
-    TIDAK DICOBA. Kirim notifikasi Telegram. Selesai.        ATAU
+    bagiannya) → HARD-FAIL. Di-RETRY otomatis (lihat kotak retry
+    di bawah) — kalau tetap gagal setelah retry habis, profil ini
+    ditandai gagal TAPI TETAP LANJUT ke profil berikutnya (ulang
+    dari langkah 1, BUKAN lagi berhenti total).                ATAU
 7c. GAGAL di tahap 5-6 (reachable/deploy, laptop SUDAH beres
     bagiannya) → SOFT-FAIL, LANJUT ke profil berikutnya (ulang
-    dari langkah 1). Profil ini dicatat gagal di ringkasan akhir,
-    tapi tak menghalangi yang lain.
+    dari langkah 1) TANPA retry di sini — jaring pengaman
+    `cs-auto-deploy.sh` (§4) yg akan terus coba lagi tiap 5 menit
+    sepanjang jendela wake. Profil ini dicatat gagal di ringkasan
+    akhir, tapi tak menghalangi yang lain.
 ```
 
 **⚠️ Revisi 2026-08-24 (v3): "berhenti total" kini BERSYARAT, bukan
@@ -123,42 +136,69 @@ sukses penuh di sisi laptop (tab terbuka, bootstrap tuntas), tapi
 kewalahan. Dulu ini tetap memblokir `balibruntattour`+`gogobuda` total,
 padahal tak ada alasan teknis untuk itu.
 
-**Fix:** kebijakan sekarang dipecah berdasar TAHAP kegagalan (lihat
-komentar `wake-orchestrator.sh`, fungsi `process_profile()`):
+**Fix v3:** kebijakan dipecah berdasar TAHAP kegagalan (lihat komentar
+`wake-orchestrator.sh`, fungsi `process_profile()`):
 - **HARD-FAIL** (tahap 2-3, trigger task ATAU laptop tak kunjung lapor
-  bootstrap selesai) = laptop sendiri yang bermasalah → berhenti total,
-  perilaku SAMA seperti sebelumnya.
+  bootstrap selesai) = laptop sendiri yang bermasalah → (v3) berhenti
+  total.
 - **SOFT-FAIL** (tahap 5-6, node tak reachable ATAU deploy tak sehat) =
   laptop sudah tuntas bagiannya, masalah di cloud → lanjut ke profil
   berikutnya, TIDAK berhenti.
 
+**✅ Revisi 2026-08-28 (v5): "berhenti total" DIHAPUS SAMA SEKALI +
+kebijakan retry "jalankan hingga berhasil" (permintaan user).**
+Insiden 27 Agustus membuktikan pola HARD-FAIL paling sering ("prompt
+Cloud Shell belum siap dlm 180 detik") **BUKAN eksklusif satu
+akun/laptop kewalahan** — bisa kena akun MANAPUN scr acak, murni
+Google Cloud Shell lambat provisioning. Teknik pemulihan manual yg
+terbukti jalan hari itu: tab yg "gagal" TETAP terbuka & idle, ~25
+menit kemudian jadi siap sendiri, tinggal `schtasks /run` ULANG (tanpa
+buka tab baru). Ini sekarang DIOTOMATISASI via fungsi
+`process_profile_with_retry()` di `wake-orchestrator.sh`:
+
+| Parameter | Nilai (kebijakan KONSERVATIF, permintaan user) |
+|---|---|
+| Retry per profil (HARD-FAIL saja) | maks **2x tambahan** (total 3 percobaan) |
+| Jeda antar percobaan | **10 menit** |
+| Kalau retry habis & tetap gagal | profil ditandai gagal, **TETAP LANJUT** ke profil berikutnya (tak lagi berhenti total, tak ada lagi kondisi apa pun yg menghentikan seluruh rantai) |
+| SOFT-FAIL | TAK di-retry di sini (sudah tanggung jawab `cs-auto-deploy.sh` §4) |
+
+Konsekuensi: `wake-orchestrator.sh` kini **SELALU mencoba ke-3 profil**
+tiap run (tak pernah lagi berhenti di tengah), TAPI satu run bisa makan
+waktu lebih lama dari dulu kalau ada profil yg butuh retry (worst-case
+~3 profil × 2 retry × 10mnt ≈ 1 jam, masih jauh di bawah lebar jendela
+wake 8 jam).
+
 ### Kalau semua sukses
 Log `~/wake-orchestrator.log` (di HUB) berakhir dengan baris:
 ```
-=== RINGKASAN AKHIR: yuni=OK, balibruntattour=OK, gogobuda=OK ===
+=== RINGKASAN AKHIR: balibruntattour=OK, gogobuda=OK, yuni=OK ===
 ```
 + notifikasi Telegram "✅ wake-orchestrator SUKSES PENUH".
 
 ### Kalau tak semua sukses
-Log SELALU berakhir dengan baris `=== RINGKASAN AKHIR: yuni=<status>,
-balibruntattour=<status>, gogobuda=<status> ===` — baris ini SATU-
-SATUNYA sumber kebenaran yang dibaca `check-wake-pipeline.sh` (jangan
-lagi menyimpulkan dari pola baris `!!! X GAGAL`, sejak v3 bisa ada
-lebih dari satu per run). Tiap profil berstatus salah satu dari:
-`OK` / `GAGAL (hard, bootstrap laptop)` / `GAGAL (soft, pasca-
-bootstrap)` / `BELUM DICOBA` (cuma muncul kalau ada hard-fail SEBELUM
-profil ini sempat dicoba).
+Log SELALU berakhir dengan baris `=== RINGKASAN AKHIR:
+balibruntattour=<status>, gogobuda=<status>, yuni=<status> ===` —
+baris ini SATU-SATUNYA sumber kebenaran yang dibaca
+`check-wake-pipeline.sh` (jangan lagi menyimpulkan dari pola baris
+`!!! X GAGAL`, sejak v3 bisa ada lebih dari satu per run). Tiap profil
+berstatus salah satu dari: `OK` / `GAGAL (hard, retry habis)` /
+`GAGAL (soft, pasca-bootstrap)` / `BELUM DICOBA` (sejak v5 seharusnya
+TAK PERNAH muncul lagi — semua profil selalu dicoba — kecuali laptop
+TAK terjangkau sama sekali di prasyarat awal, lihat §7).
 
 Baca alasan gagal spesifik di baris `!!! <profil> GAGAL (hard/soft):
 <alasan>` di badan log — biasanya salah satu dari:
-- **"trigger task tak sukses"** *(hard)* → laptop tak terjangkau SSH
-  sama sekali (mungkin belum wake/masih boot) atau task
-  `open-cs-<profil>` hilang dari Task Scheduler (cek ulang §7 kalau
-  ini terjadi).
-- **"laptop tak kunjung selesai proses bootstrap"** *(hard)* → tab
-  Cloud Shell gagal dibuka/prompt tak muncul dlm batas waktu, ATAU
-  laptop sedang sangat lambat. Cek `C:\chrome-cdp\open-cs.log`
-  langsung.
+- **"trigger task tak sukses"** *(hard, di-retry maks 2x/jeda 10mnt —
+  §3)* → laptop tak terjangkau SSH sama sekali (mungkin belum
+  wake/masih boot) atau task `open-cs-<profil>` hilang dari Task
+  Scheduler (cek ulang §7 kalau ini terjadi).
+- **"laptop tak kunjung selesai proses bootstrap"** *(hard, di-retry
+  maks 2x/jeda 10mnt — §3)* → tab Cloud Shell gagal dibuka/prompt tak
+  muncul dlm batas waktu (pola paling sering: "prompt Cloud Shell
+  belum siap dlm 180 detik", MURNI Google lambat provisioning, sering
+  hilang sendiri stlh 1-2 retry), ATAU laptop sedang sangat lambat.
+  Cek `C:\chrome-cdp\open-cs.log` langsung.
 - **"node tak reachable via SSH"** *(soft)* → bootstrap laptop kelar
   tapi WireGuard/sshd VM Cloud Shell belum naik. Bisa VM gagal
   provision, atau kredensial WG-nya bermasalah.
@@ -171,8 +211,9 @@ Baca alasan gagal spesifik di baris `!!! <profil> GAGAL (hard/soft):
 
 ## 4. Jaring pengaman siang hari (`cs-auto-deploy.sh`)
 
-Tetap jalan tiap 5 menit (08:00–22:00 WITA) SETELAH `wake-orchestrator.sh`
-selesai pagi. Fungsinya BUKAN lagi jalur utama — cuma jaga-jaga kalau:
+Tetap jalan tiap 5 menit (06:00–23:00 WITA, lintas tengah malam UTC)
+SETELAH `wake-orchestrator.sh` selesai pagi. Fungsinya BUKAN lagi jalur
+utama — cuma jaga-jaga kalau:
 - User me-refresh manual salah satu tab Cloud Shell siang hari (VM baru,
   perlu di-deploy ulang) — poller ini akan mendeteksi & membangunkan lagi
   tanpa perlu tunggu wake besok.
@@ -190,7 +231,9 @@ tidak pernah ditulis dua kali.
 
 ## 5. Penutupan malam (`pre-hibernate-sop.sh`)
 
-Jalan 22:27 WITA (3 menit sebelum hibernate paksa jam 22:30). Urutan:
+Jalan 2x/hari, 3 menit sebelum tiap break/hibernate paksa: **13:57
+WITA** (sblm break 14:00) & **22:57 WITA** (sblm hibernate 23:00).
+Urutan:
 
 1. Untuk tiap node Cloud Shell yang masih reachable: `docker stop` semua
    container + hentikan proses `ping` keepalive. (Node yang sudah
@@ -235,10 +278,10 @@ dari hub).
 ### Scheduled Task di laptop
 | Task | Trigger otomatis? | Kapan dipakai |
 |---|---|---|
-| `NodeWake-0830` | Ya, harian 08:30 | RTC wake #1 (v2, ganti `NodeWake-0845` lama) |
-| `NodeBreak-1235` | Ya, harian 12:35 | Break/hibernate siang (v2, BARU) |
-| `NodeWake2-1300` | Ya, harian 13:00 | RTC wake #2 (v2, BARU) |
-| `NodeHibernate-2245` | Ya, harian 22:45 | Hibernate malam (v2, ganti `NodeHibernate-2230` lama) |
+| `NodeWake-0600` | Ya, harian 06:00 | RTC wake #1 (v3, ganti `NodeWake-0830` lama) |
+| `NodeBreak-1400` | Ya, harian 14:00 | Break/hibernate siang (v3, ganti `NodeBreak-1235` lama) |
+| `NodeWake2-1505` | Ya, harian 15:05 | RTC wake #2 (v3, ganti `NodeWake2-1300` lama; +5mnt dari rencana 15:00 krn rollout pas lewat jam) |
+| `NodeHibernate-2300` | Ya, harian 23:00 | Hibernate malam (v3, ganti `NodeHibernate-2245` lama) |
 | `ensure-chrome-cdp` | Ya, tiap wake-event+logon | Jaga CDP hidup |
 | `open-cs-yuni` | **Tidak** (dicabut 2026-08-16) | Hub trigger via `schtasks /run` |
 | `open-cs-balibruntattour` | **Tidak** | Hub trigger via `schtasks /run` |
@@ -316,3 +359,19 @@ dokumen ini. Cuma utk darurat/testing.)
   jadi sinyal utama (§3 langkah 4), polling log laptop turun jadi info
   diagnostik saja. Kedua fix TERBUKTI via `ssh -v` (host-key) & data
   timestamp log lokal vs log HUB (polling) sebelum diterapkan.
+- **2026-08-28 (v5)**: revisi besar permintaan user — (1) **jadwal
+  digeser total**: Wake1 08:30→06:00, Break 12:35→14:00, Wake2
+  13:00→15:05, Hibernate 22:45→23:00 (§2); task Windows di-rename total
+  (`NodeWake-0600`/`NodeBreak-1400`/`NodeWake2-1505`/
+  `NodeHibernate-2300`, 4 task v3 lama dihapus — §6). (2) **urutan
+  profil dibalik**: balibruntattour→gogobuda→yuni (dulu yuni dulu).
+  (3) **kebijakan "berhenti total" DIHAPUS SAMA SEKALI** — diganti
+  retry otomatis KONSERVATIF (maks 2x tambahan/jeda 10mnt) utk
+  HARD-FAIL, baru lanjut ke profil berikutnya kalau retry habis (§3) —
+  memenuhi permintaan user "jalankan hingga berhasil", berdasar bukti
+  27/8 bahwa pola HARD-FAIL paling sering ("prompt Cloud Shell blm
+  siap 180dtk") murni provisioning Google yg lambat & sering pulih
+  sendiri, bukan laptop rusak. Rollout dieksekusi live sore 28/8 (laptop
+  kebetulan hidup dari siklus lama) sbg tes langsung tanpa nunggu
+  besok — lihat `~/wake-orchestrator.log` run 07:0x UTC 28/8 & memori
+  `project_laptop_wol_power` utk hasil verifikasi.
