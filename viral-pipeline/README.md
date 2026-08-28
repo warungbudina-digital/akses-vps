@@ -62,7 +62,13 @@ keharusan teknis (`run-drain.sh`/`orchestrator.py` sendiri cuma butuh `.50`+DB-V
 
 ## Reproduksi ke VN (Infinix)
 
-`python3 ~/viral-pipeline/ir_to_vn.py <ir.json> --out <base>` → **4 berkas**:
+**✅ 2026-08-28: OTOMATIS.** `orchestrator.py` sekarang memanggil `ir_to_vn.py` sendiri
+sesudah tiap job sukses tersimpan di DB — tak perlu langkah manual lagi. Hasil mendarat di
+`~/viral-pipeline/reproductions/job-<id>/job-<id>.*` (per-job, bukan ditumpuk di satu folder).
+Kalau `ir_to_vn.py` gagal utk suatu job, itu cuma log peringatan — analisa di DB tetap aman.
+
+Pemakaian manual (mis. re-generate dari IR lama) tetap bisa:
+`python3 ~/viral-pipeline/ir_to_vn.py <ir.json> --out <base>` → **6 berkas**:
 
 | Berkas | Isi | Dipakai untuk |
 |---|---|---|
@@ -71,6 +77,7 @@ keharusan teknis (`run-drain.sh`/`orchestrator.py` sendiri cuma butuh `.50`+DB-V
 | `<base>.vn-blueprint.json` | Rencana machine-readable (format/pacing/beat/captions/hook/phases/cut_points) | Konsumsi program |
 | `<base>.vn-recipe.md` | 7 langkah build VN + storyboard fase | Panduan manusia |
 | `<base>.segments.json` | Rencana per-segmen: tiap scene → `zoom` (Perbesar/Perkecil) + `adjust` (dari lighting) | Orchestrasi VN berpandu-data |
+| `<base>.story-script.md` | Alur cerita babak-per-babak bahasa naratif (bukan teknis) + arahan "apa yang harus direkam" + pesan inti + checklist | Dibaca kreator/AI kreatif utk visualisasi & nulis naskah rekam ulang (WAJIB, lihat memori `feedback_ir_to_vn_story_script`) |
 
 **Dimensi struktural yang SUDAH bisa direproduksi (teruji end-to-end di Infinix via Appium, 2026-08-03):**
 
