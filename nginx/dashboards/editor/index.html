@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor Script Generator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">obc-crypto.com · internal</p>
+    <h1>Generator script editing VN</h1>
+    <p class="sub">Susun brief kreatif per babak → dapat <code>.vn-blueprint.json</code> (machine-readable)
+      + <code>.vn-recipe.md</code> (checklist tap-per-tap) siap dieksekusi manual di VN Video Editor.</p>
+  </header>
+
+  <form id="gen-form">
+    <div class="card">
+      <h2>Proyek</h2>
+      <div class="grid3">
+        <label class="fld">Nama proyek
+          <input id="f-proyek" placeholder="Mis: Promo Buka Puasa" required>
+        </label>
+        <label class="fld">Klien (opsional)
+          <input id="f-klien" placeholder="Mis: Go Go Bud">
+        </label>
+        <label class="fld">Rasio
+          <select id="f-rasio">
+            <option value="9:16">9:16 (Reel/Shorts)</option>
+            <option value="16:9">16:9</option>
+            <option value="1:1">1:1</option>
+          </select>
+        </label>
+      </div>
+      <label class="fld">Instruksi / mood umum
+        <textarea id="f-instruksi" rows="2" placeholder="Mis: energik, warna cerah, target usia 18-25, CTA di akhir"></textarea>
+      </label>
+    </div>
+
+    <h2>Babak (bagian editing)</h2>
+    <div id="babak-list"></div>
+    <button type="button" id="btn-add-babak" class="btn-ghost">+ Tambah babak</button>
+
+    <div class="btn-row">
+      <button type="submit" class="btn">Generate script</button>
+    </div>
+  </form>
+
+  <section id="output-section" hidden>
+    <h2>Hasil</h2>
+    <div class="card">
+      <strong>.vn-recipe.md</strong> — <span class="muted">checklist untuk editor</span>
+      <pre id="out-md"></pre>
+      <div class="btn-row">
+        <button type="button" id="btn-dl-md" class="btn-ghost">Download .md</button>
+        <button type="button" id="btn-copy-md" class="btn-ghost">Copy</button>
+      </div>
+    </div>
+    <div class="card">
+      <strong>.vn-blueprint.json</strong> — <span class="muted">machine-readable, untuk arsip/otomasi lanjutan</span>
+      <pre id="out-json"></pre>
+      <div class="btn-row">
+        <button type="button" id="btn-dl-json" class="btn-ghost">Download .json</button>
+      </div>
+    </div>
+  </section>
+
+  <h2>Riwayat (browser ini saja)</h2>
+  <div class="card" id="history-list"></div>
+
+  <footer>Katalog bersumber dari <code>vn-automation-map.md</code> — semua generate murni di browser, tak ada data terkirim ke server.</footer>
+</div>
+
+<script src="catalog.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
