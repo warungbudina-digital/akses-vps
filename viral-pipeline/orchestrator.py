@@ -30,6 +30,14 @@ ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "1200"))  # detik; whisper CP
 # feedback_ir_to_vn_story_script) TANPA langkah manual lagi.
 IR_TO_VN    = os.path.expanduser("~/viral-pipeline/ir_to_vn.py")   # jalan LOKAL di akses-vps
 REPRO_DIR   = os.path.expanduser("~/viral-pipeline/reproductions")  # <dir>/job-<id>/job-<id>.*
+# (2026-08-29) Jalur C permintaan user: sekalian sumber-kan footage stok
+# MENTAH (Pexels+Pixabay, per babak) & kirim ke Gdrive raw -- bahan siap
+# diedit manual bebas (BEDA dari build_reproduction() di atas, yg bikin
+# cetak-biru edit OTOMATIS/VN-HP). Lihat memori project_viral_analyzer.md.
+PEXELS_FETCH     = os.path.expanduser("~/viral-pipeline/pexels_fetch.py")
+PIXABAY_FETCH    = os.path.expanduser("~/viral-pipeline/pixabay_fetch.py")
+PUSH_RAW_FOOTAGE = os.path.expanduser("~/viral-pipeline/push_raw_footage.py")
+FOOTAGE_TIMEOUT  = int(os.getenv("FOOTAGE_TIMEOUT", "600"))  # detik/skrip; jaringan-bound (unduh+upload)
 # (2026-08-28) celah #3 audit otomatisasi: job yg gagal permanen ('dead' stlh
 # max_attempts habis) dulu diam total di DB, tak ada yg tahu kecuali cek
 # manual -- beda dgn wake-orchestrator.sh yg SELALU notify Telegram. Fix:
@@ -39,6 +47,18 @@ TELEGRAM_SCRIPT = os.path.expanduser("~/akses-vps/backup/send-telegram.sh")
 
 def sh(args, inp=None, timeout=None):
     return subprocess.run(args, input=inp, capture_output=True, text=True, timeout=timeout)
+
+def sh_safe(args, timeout=None):
+    """sh() tapi TAK PERNAH raise (TimeoutExpired dkk ditangkap) -- dipakai
+    langkah best-effort PASCA-job-sukses (build_reproduction, fetch_and_push_
+    footage). Tanpa ini, subprocess.run(timeout=...) yg raise TimeoutExpired
+    lolos ke except umum di main() -> fail_job() keliru menimpa status job
+    yg SEBENARNYA sudah 'analyzed' -- celah yg ditemukan 2026-08-29 saat
+    nambah langkah footage baru, sekalian difix di build_reproduction()."""
+    try:
+        return sh(args, timeout=timeout)
+    except Exception as e:
+        return subprocess.CompletedProcess(args, -1, "", f"exception: {e!r}")
 
 def ssh_db(cmd, timeout=None):
     return sh(["ssh", DBVPS, cmd], timeout=timeout)
@@ -198,13 +218,55 @@ def build_reproduction(job, analysis):
     except Exception as e:
         log(f"  (build_reproduction: gagal tulis IR lokal, dilewati):", repr(e)[:150])
         return None
-    r = sh(["python3", IR_TO_VN, base + ".ir.json", "--out", base], timeout=60)
+    r = sh_safe(["python3", IR_TO_VN, base + ".ir.json", "--out", base], timeout=60)
     if r.returncode != 0:
         log(f"  (ir_to_vn.py gagal utk job {jid}, analisa TETAP tersimpan di DB, cuma bonus reproduksi dilewati):",
             (r.stderr or r.stdout or "").strip()[:250])
         return None
     log(f"  reproduksi VN (story-script + blueprint) tersimpan: {outdir}/")
     return outdir
+
+def _last_line(r):
+    lines = [ln.strip() for ln in (r.stderr or "").splitlines() if ln.strip()]
+    return lines[-1] if lines else ""
+
+def fetch_and_push_footage(job, outdir):
+    """(2026-08-29, Jalur C permintaan user "otomatis") Sekalian sumber-kan
+    footage stok MENTAH per babak (Pexels + Pixabay, dua provider = lebih
+    banyak kandidat klip per babak) & kirim ke Gdrive gfootage:RAW-VIDEO/
+    job-<id>/ -- bahan baku siap diedit manual bebas oleh user sendiri
+    (dipandu editor.obc-crypto.com/.story-script.md), BEDA dari
+    build_reproduction() (itu bikin cetak-biru utk edit OTOMATIS/VN-HP).
+    Best-effort PENUH sama spt build_reproduction(): job SUDAH 'analyzed' di
+    DB sebelum dipanggil, kegagalan di sini TAK PERNAH menggagalkan job."""
+    jid = job["id"]
+    base = os.path.join(outdir, f"job-{jid}")
+    blueprint = base + ".vn-blueprint.json"
+    if not os.path.isfile(blueprint):
+        log(f"  (footage: {os.path.basename(blueprint)} tak ada, dilewati)")
+        return
+
+    plans = []
+    for name, script in (("pexels", PEXELS_FETCH), ("pixabay", PIXABAY_FETCH)):
+        r = sh_safe(["python3", script, blueprint], timeout=FOOTAGE_TIMEOUT)
+        plan_path = f"{base}.{name}-plan.json"
+        if r.returncode == 0 and os.path.isfile(plan_path):
+            plans.append(plan_path)
+            log(f"  footage {name}: {_last_line(r)[:150]}")
+        else:
+            log(f"  (footage {name}: gagal/skip, rc={r.returncode}):",
+                (_last_line(r) or r.stdout or "")[-200:])
+
+    if not plans:
+        log("  (footage: tak ada plan yg berhasil, push ke Gdrive dilewati)")
+        return
+
+    r = sh_safe(["python3", PUSH_RAW_FOOTAGE] + plans, timeout=FOOTAGE_TIMEOUT)
+    if r.returncode != 0:
+        log("  (footage: push_raw_footage.py gagal, klip TETAP lokal di hub, tak sampai Gdrive):",
+            (_last_line(r) or r.stdout or "")[-200:])
+    else:
+        log(f"  footage -> gfootage:RAW-VIDEO/job-{jid}/ :", _last_line(r)[:150])
 
 def cleanup(jid):
     ssh_db(f"rm -f {DBVPS_WORK}/job-{jid}.*")
@@ -233,7 +295,9 @@ def main():
             werr = write_result(job, data)
             if werr:
                 log("  x write:", werr); fail_job(job, werr); cleanup(job["id"]); fail += 1; continue
-            build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
+            outdir = build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
+            if outdir:
+                fetch_and_push_footage(job, outdir)              # best-effort, tak pernah gagalkan job
             cleanup(job["id"])
             ok += 1
             sc = len(data["analysis"].get("scene_analysis", []))
