@@ -179,14 +179,28 @@ process_profile() {
 
   log "=== PROFIL $name: mulai ==="
 
-  if ! open_cs_profile "$name"; then
-    log "!!! $name GAGAL (hard): trigger task open-cs-$name tak sukses."
-    return 2
-  fi
+  # ✅ 2026-08-30: cek dulu apakah profil ini SUDAH reachable SEBELUM buka
+  # tab apa pun. Insiden 30/8: sesi lama (mis. dari siklus sebelumnya,
+  # tab-nya sudah ditutup tapi VM-nya sendiri masih hidup krn keepalive --
+  # bisa krn SOP pre-hibernate gagal tutup bersih) masih hidup tanpa tab
+  # terbuka -> begitu open_cs_profile() buka tab BARU utk akun yg sama,
+  # Cloud Shell "session transferred to another tab": sesi lama yg tadinya
+  # sehat ikut mati, DAN tab baru gagal ngetik (chmod terpotong di tengah,
+  # scrape kosong) -- kedua sisi jadi gagal. Cek ini juga otomatis
+  # menyelamatkan retry berikutnya kalau attempt sebelumnya diam-diam
+  # sebenarnya berhasil (skip buka tab lagi, kurangi tab menumpuk).
+  if reachable_cs "$host"; then
+    log "$name: SUDAH reachable sebelum apa pun dicoba (sesi lama masih hidup) -- skip buka tab, langsung lanjut ke deploy."
+  else
+    if ! open_cs_profile "$name"; then
+      log "!!! $name GAGAL (hard): trigger task open-cs-$name tak sukses."
+      return 2
+    fi
 
-  if ! wait_bootstrap_result "$name" "$bs_limit" "$host"; then
-    log "!!! $name GAGAL (hard): laptop tak kunjung selesai proses bootstrap."
-    return 2
+    if ! wait_bootstrap_result "$name" "$bs_limit" "$host"; then
+      log "!!! $name GAGAL (hard): laptop tak kunjung selesai proses bootstrap."
+      return 2
+    fi
   fi
 
   # ⚠️ Sejak revisi 2026-08-24 v2, wait_bootstrap_result() di atas SUDAH
