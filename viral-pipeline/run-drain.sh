@@ -44,7 +44,14 @@ if ssh -o ControlPath="$C50_SOCK" -O check "$C50" 2>/dev/null; then
   log "master .50 sudah hidup."
 else
   log "master .50 mati -> bangun..."
-  if ssh -i "$ADMIN_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no \
+  # (2026-08-29) fix: StrictHostKeyChecking=no SAJA TERBUKTI TAK CUKUP kalau
+  # known_hosts sudah punya entri LAMA yg beda (Cloud Shell ephemeral ganti
+  # host-key tiap wake) -- ssh tetap tolak "Host key has changed" krn dikira
+  # MITM. WAJIB + UserKnownHostsFile=/dev/null (pola sama CS_SSHOPTS di
+  # lib-cs-deploy.sh, Bug KELIMA 24/8 -- run-drain.sh kelewat waktu itu,
+  # ketahuan skrg saat uji end-to-end job#31 hard-fail "Permission denied
+  # (publickey)" persis pola ini meski WG handshake fresh).
+  if ssh -i "$ADMIN_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
          -o ControlMaster=auto -o ControlPath="$C50_SOCK" -o ControlPersist=6h \
          -MNf -o ConnectTimeout=12 -p 22 "$C50" 2>/dev/null; then
     log "master .50 UP."
