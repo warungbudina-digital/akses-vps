@@ -2,7 +2,7 @@
 # =====================================================================
 # cs-auto-deploy.sh — cron poller (HUB akses-vps): JARING PENGAMAN yang
 # jalan tiap 5 menit sepanjang hari. Kalau profil Cloud Shell laptop
-# (yuni/.50, balibruntattour/.60, gogobuda/.61) reachable tapi projectnya
+# (yuni/.50, balibruntattour/.60, gogobuda/.61, ogis/.8) reachable tapi projectnya
 # belum/tak lagi sehat (mis. VM Cloud Shell di-refresh manual siang hari,
 # atau container sempat mati), skrip ini idempoten membangunkannya lagi.
 #
@@ -39,5 +39,6 @@ run_and_log() { "$1" 2>&1 | sed 's/^/[cs-auto-deploy] /' | tee -a "$LOG" >/dev/n
 run_and_log deploy_yuni
 run_and_log deploy_balibruntattour
 run_and_log deploy_gogobuda
+run_and_log deploy_ogis
 
 log "cs-auto-deploy selesai."

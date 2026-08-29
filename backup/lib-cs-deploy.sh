@@ -239,3 +239,46 @@ REMOTE_EOF
   echo ".61 n8n-uploader TAK sehat setelah 90s menunggu (container status=$st, healthz=${health:-belum-dicek}) -> cek: ssh gogobuda65@10.66.66.61 'docker logs n8n'."
   return 1
 }
+
+# ---------------------------------------------------------------------
+# deploy_ogis — .8, full-tool-browser (instance scraper terpisah, akun
+# maydualapan8@gmail.com / Chrome "Ogis-Chain" di laptop). Reuse
+# bring-up-browser.sh APA ADANYA lewat env override C60_HOST/BROWSER_API
+# (skrip itu sudah baca dari env, pola sama dgn browser-db-backup.sh) --
+# TIDAK ada script baru, cuma instance kedua dari stack yg sama.
+# Ditambahkan 2026-08-29 (Fase 1 onboarding profil ke-4 wake-orchestrator).
+# ---------------------------------------------------------------------
+deploy_ogis() { _locked_deploy ogis _deploy_ogis_impl; }
+_deploy_ogis_impl() {
+  local host="maydualapan8@10.66.66.8"
+  if ! reachable_cs "$host"; then
+    echo ".8 (ogis) belum reachable."
+    return 1
+  fi
+  echo ".8 (ogis) reachable -> bring-up browser (instance scraper terpisah)"
+  local browser_rc=1
+  if C60_HOST="$host" BROWSER_API="http://${host#*@}:8080" \
+     bash "$HOME/akses-vps/backup/bring-up-browser.sh"; then
+    echo ".8 ogis browser bring-up OK (health+auth terverifikasi oleh bring-up-browser.sh sendiri)."
+    browser_rc=0
+  else
+    echo ".8 ogis browser bring-up GAGAL."
+  fi
+
+  # Stack Ollama+RAG mandiri + 5 profil browser + link Gdrive -- SENGAJA
+  # independen dari status browser_rc di atas (2 stack terpisah, lihat
+  # akses-vps/ogis-vault/README.md). Kegagalan di sini TIDAK menjatuhkan
+  # keseluruhan deploy_ogis (browser tetap jadi syarat utama profil "OK"
+  # di wake-orchestrator) -- cuma dilog, supaya gampang diaudit terpisah.
+  if bash "$HOME/akses-vps/ogis-vault/bring-up-ogis-vault.sh"; then
+    echo ".8 ogis-vault (Ollama+index) bring-up OK."
+  else
+    echo ".8 ogis-vault (Ollama+index) bring-up GAGAL (tak menjatuhkan status browser)."
+  fi
+  bash "$HOME/akses-vps/ogis-vault/setup-browser-profiles.sh" \
+    || echo ".8 setup-browser-profiles GAGAL/no-op (lihat log di atas)."
+  bash "$HOME/akses-vps/ogis-vault/setup-gdrive-remotes.sh" \
+    || echo ".8 setup-gdrive-remotes GAGAL/no-op (lihat log di atas)."
+
+  return "$browser_rc"
+}

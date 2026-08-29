@@ -12,7 +12,7 @@
 # masalah kegagalan berulang sebelumnya).
 #
 # URUTAN PROFIL (direvisi 2026-08-28, permintaan user):
-# balibruntattour -> gogobuda -> yuni (dulu yuni dulu, kini TERAKHIR).
+# balibruntattour -> gogobuda -> yuni -> ogis (Fase 1 2026-08-29: tambah ogis di akhir).
 #
 # KEBIJAKAN GAGAL (direvisi 2026-08-28 v5 — "jalankan hingga berhasil",
 # kebijakan retry KONSERVATIF, permintaan user):
@@ -40,13 +40,14 @@
 # deploy_<profil> di lib-cs-deploy.sh sudah menjamin ini secara sinkron.
 #
 # Prasyarat di laptop (sekali-setup, sudah dikerjakan 2026-08-16):
-#   - 3 scheduled task tanpa auto-trigger: open-cs-yuni, open-cs-
-#     balibruntattour, open-cs-gogobuda (masing2 InteractiveToken, cuma
-#     bisa dipicu `schtasks /run` dari hub via ssh ltap-mini).
+#   - 4 scheduled task tanpa auto-trigger: open-cs-yuni, open-cs-
+#     balibruntattour, open-cs-gogobuda, open-cs-ogis (masing2
+#     InteractiveToken, cuma bisa dipicu `schtasks /run` dari hub via
+#     ssh ltap-mini).
 #   - Task lama `open-cs` (buka 3 sekaligus) auto-trigger-nya DICABUT,
 #     tapi tasknya tetap ada utk fallback manual/darurat kalau perlu.
 #
-# Exit code: 0 = SEMUA 3 profil selesai sehat. 1 = ada yg tak sehat
+# Exit code: 0 = SEMUA 4 profil selesai sehat. 1 = ada yg tak sehat
 # (lihat log utk tahu profil mana & kenapa -- skrip tetap mencoba
 # SEMUA profil sampai akhir, tak lagi berhenti di tengah).
 # =====================================================================
@@ -98,7 +99,7 @@ if ! timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/
   exit 0
 fi
 rm -f "$STATE"
-log "laptop terjangkau -> mulai alur bertahap 3 profil (urutan: balibruntattour -> gogobuda -> yuni)."
+log "laptop terjangkau -> mulai alur bertahap 4 profil (urutan: balibruntattour -> gogobuda -> yuni -> ogis)."
 
 # open_cs_profile <task-name-suffix> -> trigger task open-cs-<X> di laptop
 # via schtasks/run (InteractiveToken, WAJIB lewat Scheduled Task -- SSH
@@ -255,15 +256,15 @@ process_profile_with_retry() {
 # supaya laporan Telegram tak perlu nebak-nebak dari pola baris "!!! X
 # GAGAL" yg bisa muncul lebih dari sekali per run.
 # ---------------------------------------------------------------------
-STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"
+STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"; STATUS_OGIS="BELUM DICOBA"
 
 finish() {
-  log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI ==="
-  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ]; then
-    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni semua sehat & jalan."
+  log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI, ogis=$STATUS_OGIS ==="
+  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ] && [ "$STATUS_OGIS" = "OK" ]; then
+    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni+ogis semua sehat & jalan."
     exit 0
   fi
-  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI. Detail: ~/wake-orchestrator.log (hub)."
+  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI, ogis=$STATUS_OGIS. Detail: ~/wake-orchestrator.log (hub)."
   exit 1
 }
 
@@ -290,6 +291,14 @@ case "$rc" in
   1) STATUS_YUNI="GAGAL (soft, pasca-bootstrap)" ;;
   2) STATUS_YUNI="GAGAL (hard, retry habis)" ;;
 esac
-log "yuni ini profil TERAKHIR -- tak ada lagi yg menyusul."
+
+process_profile_with_retry "ogis" "maydualapan8@10.66.66.8" deploy_ogis 240 60
+rc=$?
+case "$rc" in
+  0) STATUS_OGIS="OK" ;;
+  1) STATUS_OGIS="GAGAL (soft, pasca-bootstrap)" ;;
+  2) STATUS_OGIS="GAGAL (hard, retry habis)" ;;
+esac
+log "ogis ini profil TERAKHIR -- tak ada lagi yg menyusul."
 
 finish

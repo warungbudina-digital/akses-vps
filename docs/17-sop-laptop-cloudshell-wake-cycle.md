@@ -10,7 +10,7 @@
 
 Laptop **SUARAHATI** (ASUS X450EA, lemah — AMD E1-2500, 2 core) bukan
 node 24/7. Dia **wake↔hibernate 2 SIKLUS/hari** (pagi + siang-malam,
-lihat §2), dan selama "hidup" dia jadi host untuk **3 sesi Google
+lihat §2), dan selama "hidup" dia jadi host untuk **4 sesi Google
 Cloud Shell** (VM gratis
 ephemeral Google, masing-masing terikat ke satu akun/profil Chrome),
 tiap sesi menjalankan satu project:
@@ -20,11 +20,12 @@ tiap sesi menjalankan satu project:
 | `yuni` (Profile 10) | warungbudina | `10.66.66.50` | `viral_analyzer` V2 (ML: whisper+CLIP) |
 | `balibruntattour` (Profile 29) | balibruntat | `10.66.66.60` | `full-tool-browser` |
 | `gogobuda` (Profile 26) | Gogo | `10.66.66.61` | `n8n-uploader` (repo `mcp-video-editor`) |
+| `ogis` (Profile 11, "Ogis-Chain") | maydualapan8 | `10.66.66.8` | `full-tool-browser` (instance KEDUA, terpisah — scraper khusus `viral_analyzer`; ditambah 2026-08-29, lihat `docs/20-ogis-cloudshell-onboarding.md`) |
 
-Karena laptopnya lemah, membuka ketiga tab Cloud Shell **sekaligus**
+Karena laptopnya lemah, membuka keempat tab Cloud Shell **sekaligus**
 bikin CPU kewalahan → banyak gagal (bukti nyata 2026-08-16: 2 dari 3
-gagal saat dibuka bersamaan). Makanya alur sekarang **bertahap satu
-per satu**, lihat §3.
+gagal saat dibuka bersamaan, waktu masih 3 profil). Makanya alur
+sekarang **bertahap satu per satu**, lihat §3.
 
 ## 2. Siklus harian — 2 SIKLUS/hari (jam WITA, UTC = WITA − 8)
 
@@ -45,13 +46,13 @@ Hibernate 22:45→**23:00**. Task Windows di-rename total (lihat §6).
 |---|---|---|---|
 | **06:00** | 22:00 (h-1) | Laptop **wake #1** (RTC, task `NodeWake-0600`) | Laptop (Task Scheduler lokal) |
 | 06:00:20 | 22:00:20 (h-1) | `ensure-chrome-cdp` pastikan Chrome+CDP hidup (trigger event-wake, otomatis di KEDUA wake) | Laptop |
-| **06:03** | **22:03 (h-1)** | **`wake-orchestrator.sh` mulai** — alur bertahap 3 profil, urutan balibruntattour→gogobuda→yuni (§3) | **HUB (cron)** |
+| **06:03** | **22:03 (h-1)** | **`wake-orchestrator.sh` mulai** — alur bertahap 4 profil, urutan balibruntattour→gogobuda→yuni→ogis (§3) | **HUB (cron)** |
 | 06:00–14:00 | 22:00 (h-1)–06:00 | `cs-auto-deploy.sh` jalan tiap 5 menit sbg **jaring pengaman** (§4) | HUB (cron) |
 | **13:57** | **05:57** | `pre-hibernate-sop.sh` — stop container node + tutup Chrome laptop dgn rapi (§5) | HUB (cron) |
 | **14:00** | **06:00** | Laptop **break/hibernate #1** (task `NodeBreak-1400`) | Laptop (Task Scheduler lokal) |
 | 14:00–15:05 | 06:00–07:05 | **Jeda istirahat ~1 jam** — laptop tidur, semua no-op wajar | — |
 | **15:05** | **07:05** | Laptop **wake #2** (RTC, task `NodeWake2-1505`) | Laptop (Task Scheduler lokal) |
-| **15:08** | **07:08** | **`wake-orchestrator.sh` mulai lagi** — alur bertahap 3 profil dari nol (VM baru) | **HUB (cron)** |
+| **15:08** | **07:08** | **`wake-orchestrator.sh` mulai lagi** — alur bertahap 4 profil dari nol (VM baru) | **HUB (cron)** |
 | 15:05–23:00 | 07:05–15:00 | `cs-auto-deploy.sh` jaring pengaman lanjut | HUB (cron) |
 | **22:57** | **14:57** | `pre-hibernate-sop.sh` — penutupan malam | HUB (cron) |
 | **23:00** | **15:00** | Laptop **hibernate total** (task `NodeHibernate-2300`) | Laptop (Task Scheduler lokal) |
@@ -163,11 +164,11 @@ buka tab baru). Ini sekarang DIOTOMATISASI via fungsi
 | Kalau retry habis & tetap gagal | profil ditandai gagal, **TETAP LANJUT** ke profil berikutnya (tak lagi berhenti total, tak ada lagi kondisi apa pun yg menghentikan seluruh rantai) |
 | SOFT-FAIL | TAK di-retry di sini (sudah tanggung jawab `cs-auto-deploy.sh` §4) |
 
-Konsekuensi: `wake-orchestrator.sh` kini **SELALU mencoba ke-3 profil**
+Konsekuensi: `wake-orchestrator.sh` kini **SELALU mencoba ke-4 profil**
 tiap run (tak pernah lagi berhenti di tengah), TAPI satu run bisa makan
 waktu lebih lama dari dulu kalau ada profil yg butuh retry (worst-case
-~3 profil × 2 retry × 10mnt ≈ 1 jam, masih jauh di bawah lebar jendela
-wake 8 jam).
+~4 profil × 2 retry × 10mnt ≈ 1 jam 20 menit, masih jauh di bawah lebar
+jendela wake 8 jam).
 
 ### Kalau semua sukses
 Log `~/wake-orchestrator.log` (di HUB) berakhir dengan baris:
@@ -245,7 +246,7 @@ Urutan:
       "leave site?" yang mengganjal), **paksa** (`Stop-Process -Force`).
    c. **PENTING (fix 2026-08-16):** setelah proses benar-benar mati,
       tulis ulang field `exit_type` jadi `"Normal"` di file Preferences
-      3 profil Cloud Shell. Ini WAJIB — tanpa langkah ini, Chrome
+      4 profil Cloud Shell. Ini WAJIB — tanpa langkah ini, Chrome
       mengira dirinya "crash" (karena sempat di-force-kill) dan akan
       **otomatis me-restore semua tab lama** begitu dibuka lagi besok
       paginya, yang persis gejala "sisa aplikasi kemarin masih ada"
@@ -258,8 +259,8 @@ Urutan:
 |---|---|
 | `wake-orchestrator.sh` | Jalur utama pasca-wake, alur bertahap ketat (§3) |
 | `cs-auto-deploy.sh` | Jaring pengaman 5-menitan siang hari (§4) |
-| `lib-cs-deploy.sh` | **Library bersama** — 3 fungsi `deploy_yuni`/`deploy_balibruntattour`/`deploy_gogobuda`, dipakai KEDUA skrip di atas |
-| `bring-up-browser.sh` | Deploy detail utk balibruntattour (dipanggil dari lib) |
+| `lib-cs-deploy.sh` | **Library bersama** — 4 fungsi `deploy_yuni`/`deploy_balibruntattour`/`deploy_gogobuda`/`deploy_ogis`, dipakai KEDUA skrip di atas |
+| `bring-up-browser.sh` | Deploy detail utk balibruntattour DAN ogis (dipanggil dari lib 2x, beda host via env override `C60_HOST`/`BROWSER_API` — instance browser-scraper terpisah, 1 script direuse apa adanya) |
 | `pre-hibernate-sop.sh` | Penutupan malam (§5) |
 | `send-telegram.sh` | Helper notifikasi (dipakai wake-orchestrator) |
 
@@ -286,7 +287,8 @@ dari hub).
 | `open-cs-yuni` | **Tidak** (dicabut 2026-08-16) | Hub trigger via `schtasks /run` |
 | `open-cs-balibruntattour` | **Tidak** | Hub trigger via `schtasks /run` |
 | `open-cs-gogobuda` | **Tidak** | Hub trigger via `schtasks /run` |
-| `open-cs` (lama, all-3) | **Tidak** (dicabut 2026-08-16) | **Fallback manual/darurat SAJA** — kalau `wake-orchestrator.sh` mau di-bypass total, jalankan ini manual (`ssh ltap-mini "schtasks /run /tn open-cs"`), tapi ingat ini balik ke pola lama (3 tab sekaligus, rawan resource-starvation) |
+| `open-cs-ogis` | **Tidak** (dibuat 2026-08-29) | Hub trigger via `schtasks /run` |
+| `open-cs` (lama, all-3) | **Tidak** (dicabut 2026-08-16) | **Fallback manual/darurat SAJA** — kalau `wake-orchestrator.sh` mau di-bypass total, jalankan ini manual (`ssh ltap-mini "schtasks /run /tn open-cs"`), tapi ingat ini balik ke pola lama (3 tab sekaligus, rawan resource-starvation, DAN tak mencakup ogis krn task lama ini dibuat sebelum profil ke-4 ada) |
 
 ## 7. Operasi manual / troubleshooting
 
