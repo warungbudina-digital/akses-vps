@@ -105,8 +105,36 @@ fi
 sed -i "s|^API_KEY=.*|API_KEY=${BROWSER_API_KEY}|" .env
 sed -i "s|^MQTT_ENABLED=.*|MQTT_ENABLED=false|" .env
 chmod 600 .env
+REMOTE
 
-# Build Chromium bisa >2mnt -> DETACHED + sentinel (jangan tahan channel SSH).
+# ── 1.5. Belum ada sesi login (VM fresh pasca-recycle)? restore dari Gdrive ──
+# (2026-08-30) sesi login (sessionSave, storageState per-akun) disimpan di
+# data/artifacts/<profil>/sessions/*.json -- bind-mount ke disk VM .60,
+# EPHEMERAL sama seperti repo -- tanpa ini, semua login hilang tiap recycle.
+# Restore dari backup terbaru `browser-profile-backup.sh` (Gdrive
+# maydualapan8, Project-Tutorial/browser-profile/). No-op anggun kalau
+# belum pernah ada backup (first-ever run) ATAU sesi lokal sudah ada
+# (tak menimpa sesi yg mungkin lebih baru dari backup).
+PROFILES_REMOTE="${PROFILES_REMOTE:-project-tutorial:browser-profile}"
+if ! ssh60 'find ~/browser/data/artifacts -path "*/sessions/*.json" -print -quit 2>/dev/null | grep -q .' 2>/dev/null; then
+  log "Belum ada sesi login tersimpan di .60 -> cek backup terbaru di Gdrive (${PROFILES_REMOTE})..."
+  LATEST="$(rclone lsf "$PROFILES_REMOTE" --include 'sessions-*.tar.gz' 2>/dev/null | sort | tail -1)"
+  if [ -n "$LATEST" ]; then
+    log "Restore dari ${PROFILES_REMOTE}/${LATEST}..."
+    if rclone cat "${PROFILES_REMOTE}/${LATEST}" 2>/dev/null | ssh60 'mkdir -p ~/browser/data/artifacts && tar -xzf - -C ~/browser/data/artifacts'; then
+      log "OK: sesi login ter-restore."
+    else
+      log "WARN: restore gagal, sesi akan mulai kosong (bukan fatal)."
+    fi
+  else
+    log "Belum ada backup sesi di Gdrive (wajar kalau pertama kali)."
+  fi
+fi
+
+# ── 1.6. Build Chromium bisa >2mnt -> DETACHED + sentinel (jangan tahan channel SSH) ──
+ssh60 'bash -s' <<'REMOTE'
+set -e
+cd "$HOME/browser"
 rm -f "$HOME/browser-done" "$HOME/browser-fail"
 nohup bash -c 'cd "$HOME/browser" && docker compose up -d --build && touch "$HOME/browser-done" || touch "$HOME/browser-fail"' \
   > "$HOME/browser-deploy.log" 2>&1 &
