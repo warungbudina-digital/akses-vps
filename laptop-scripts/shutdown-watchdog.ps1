@@ -84,7 +84,17 @@ try {
   $sisa = @(Get-Process chrome -ErrorAction SilentlyContinue)
   if ($sisa.Count -gt 0) { $sisa | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }
   $base = 'C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data'
-  foreach ($t in @('Profile 10','Profile 26','Profile 29')) {
+  # "Profile 11" (ogis) SENGAJA ikut dibersihkan meski ogis sudah dinonaktifkan
+  # dari pipeline. Menonaktifkan ogis di skrip kita TIDAK mencegah Chrome
+  # membukanya sendiri: Chrome menyimpan daftar "last_active_profiles" di
+  # Local State dan memulihkan jendela profil itu saat start, apalagi kalau
+  # exit_type-nya tertinggal "Crashed".
+  # Kasus nyata 2026-08-31 (ditemukan USER lewat pengamatan langsung, bukan
+  # dari log): last_active_profiles = ["Profile 11","Profile 29","Profile 26",
+  # "Profile 10"] -- ogis dipulihkan PALING AWAL, sehingga laptop menjalankan
+  # 4 tab Cloud Shell, bukan 3. Itulah sebab `yuni` (yg jadi tab KEEMPAT)
+  # selalu gagal dan Chrome selalu crash, termasuk pada boot yang bersih.
+  foreach ($t in @('Profile 10','Profile 26','Profile 29','Profile 11')) {
     $pf = Join-Path $base "$t\Preferences"
     if (Test-Path $pf) {
       $raw = Get-Content $pf -Raw
@@ -94,6 +104,20 @@ try {
     }
   }
   Log ("Chrome ditutup ({0} -> {1} proses), exit_type dipatch Normal." -f $procs.Count, (@(Get-Process chrome -ErrorAction SilentlyContinue)).Count)
+  # Keluarkan "Profile 11" (ogis) dari daftar profil yang akan dipulihkan
+  # Chrome pada start berikutnya. Tanpa ini, sekali saja ogis pernah terbuka,
+  # ia akan terus muncul sendiri tiap boot dan menambah beban tab keempat.
+  $lsPath = Join-Path $base 'Local State'
+  if (Test-Path $lsPath) {
+    $ls = Get-Content $lsPath -Raw
+    $m = [regex]::Match($ls, '"last_active_profiles"\s*:\s*\[([^\]]*)\]')
+    if ($m.Success -and $m.Groups[1].Value -match 'Profile 11') {
+      $items = $m.Groups[1].Value -split ',' | Where-Object { $_ -notmatch 'Profile 11' }
+      $newArr = '"last_active_profiles":[' + ($items -join ',') + ']'
+      Set-Content -Path $lsPath -Value ($ls.Remove($m.Index, $m.Length).Insert($m.Index, $newArr)) -NoNewline -Encoding UTF8
+      Log ("last_active_profiles dibersihkan dari Profile 11 -> [{0}]" -f ($items -join ','))
+    } else { Log "last_active_profiles sudah bersih dari Profile 11." }
+  }
 } catch { Log ("WARN gagal menutup Chrome rapi: {0}" -f $_.Exception.Message) }
 Log "    Setelah mati, user mencabut listrik (jam akan ter-reset; sync-time.ps1 membetulkannya saat boot berikutnya)."
 & shutdown /s /t $warnSec /c "Batas kerja 14 jam tercapai - laptop dimatikan otomatis. Simpan pekerjaan Anda."

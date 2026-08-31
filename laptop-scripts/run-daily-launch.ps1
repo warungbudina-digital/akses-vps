@@ -74,6 +74,43 @@ if ((Get-Date).Year -lt 2026) {
   exit 2
 }
 
+# ---- Gerbang 3: pastikan Chrome tak akan memulihkan profil ogis sendiri ----
+# INI PENYEBAB KEGAGALAN 31/8, ditemukan USER lewat pengamatan langsung.
+# Menonaktifkan ogis di PROFILES/task/hub TIDAK cukup: Chrome punya daftarnya
+# sendiri di Local State ("last_active_profiles") dan memulihkan jendela profil
+# itu saat start. Hari itu isinya ["Profile 11","Profile 29","Profile 26",
+# "Profile 10"] dgn Profile 11 (ogis) PALING AWAL dan exit_type "Crashed",
+# sehingga laptop 2 core/1,4 GHz memuat 4 tab Cloud Shell -- bukan 3.
+# Akibatnya `yuni` (jadi tab KEEMPAT) selalu gagal & Chrome selalu crash,
+# termasuk pada boot yang benar-benar bersih.
+# Dicek DI SINI, sebelum Chrome disentuh, supaya perbaikannya sempat berlaku.
+$chromeBase = 'C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data'
+$lsPath = Join-Path $chromeBase 'Local State'
+if (Test-Path $lsPath) {
+  try {
+    $ls = Get-Content $lsPath -Raw
+    $m = [regex]::Match($ls, '"last_active_profiles"\s*:\s*\[([^\]]*)\]')
+    if ($m.Success -and $m.Groups[1].Value -match 'Profile 11') {
+      $items = $m.Groups[1].Value -split ',' | Where-Object { $_ -notmatch 'Profile 11' }
+      $newArr = '"last_active_profiles":[' + ($items -join ',') + ']'
+      Set-Content -Path $lsPath -Value ($ls.Remove($m.Index, $m.Length).Insert($m.Index, $newArr)) -NoNewline -Encoding UTF8
+      Log ("PERBAIKAN: Profile 11 (ogis) masih terdaftar di last_active_profiles -> dikeluarkan. Sisa: [{0}]" -f ($items -join ','))
+    } else { Log "last_active_profiles bersih dari Profile 11 (ogis tak akan dipulihkan Chrome)." }
+  } catch { Log ("WARN gagal memeriksa last_active_profiles: {0}" -f $_.Exception.Message) }
+}
+# exit_type "Crashed" yang tertinggal juga memicu restore tab lama -> paksa Normal.
+foreach ($t in @('Profile 10','Profile 26','Profile 29','Profile 11')) {
+  $pf = Join-Path $chromeBase "$t\Preferences"
+  if (Test-Path $pf) {
+    try {
+      $raw = Get-Content $pf -Raw
+      $new = $raw -replace '"exit_type"\s*:\s*"[^"]+"', '"exit_type":"Normal"'
+      $new = $new -replace '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true'
+      if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8; Log ("  {0}: exit_type dipatch Normal (cegah restore tab lama)." -f $t) }
+    } catch {}
+  }
+}
+
 # ---- Jalankan tiap profil, SATU PER SATU sampai tuntas ----
 if (-not (Test-Path $openCs)) { Log "BATAL: $openCs tak ditemukan."; exit 2 }
 $hasil = @()

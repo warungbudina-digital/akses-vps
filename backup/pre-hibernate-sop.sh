@@ -69,10 +69,17 @@ if timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/nu
     # AUTO-RESTORE sesi/tab lama (persis yg dikeluhkan user "sisa aplikasi kemarin
     # masih ada"). Makanya SETELAH proses benar2 mati, exit_type dipatch manual
     # jadi "Normal" di file Preferences tiap profil Cloud Shell (Profile 10/26/29
-    # = yuni/gogobuda/balibruntattour; "Profile 11"/ogis dikeluarkan 31/8 seiring
-    # ogis dinonaktifkan) — teknik standar cegah restore-prompt,
+    # = yuni/gogobuda/balibruntattour) DAN "Profile 11" (ogis).
+    # ⚠️ Profile 11 SENGAJA tetap dipatch meski ogis sudah dinonaktifkan:
+    # menonaktifkan ogis di skrip kita TIDAK mencegah Chrome membukanya sendiri.
+    # Chrome punya daftar "last_active_profiles" di Local State dan memulihkan
+    # jendela profil itu saat start, apalagi kalau exit_type tertinggal "Crashed".
+    # Kasus nyata 31/8 (ditemukan USER lewat pengamatan langsung): ogis dipulihkan
+    # PALING AWAL -> laptop memuat 4 tab Cloud Shell, bukan 3 -> `yuni` (jadi tab
+    # keempat) selalu gagal & Chrome crash, termasuk pada boot bersih.
+    # — teknik standar cegah restore-prompt,
     # TAK menyentuh password/cookies/history, cuma flag housekeeping ini.
-    PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'
+    PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29","Profile 11")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'
     EB=$(printf '%s' "$PS_KILL" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
     timeout 25 ssh ltap-mini "powershell -NoProfile -EncodedCommand $EB" 2>&1 | grep -vE 'CLIXML|<Objs' | grep -iE 'chrome proc' | sed 's/^/    /'
   fi
