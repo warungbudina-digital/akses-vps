@@ -23,9 +23,13 @@ ADMIN_KEY="$HOME/.ssh/akses-vps-cloudshell-admin"
 SSHOPT="-i $ADMIN_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
 # Node Cloud Shell: label=IP:user
-# ⚠️ 2026-08-31: `ogis` (.8, profil ke-4 sejak 29/8) TERTINGGAL di sini sejak
-# ditambahkan -- container-nya tak pernah ikut dihentikan sblm hibernate.
-NODES="10.66.66.50:warungbudina 10.66.66.60:balibruntattour 10.66.66.61:gogobuda65 10.66.66.8:maydualapan8"
+# ⚠️ 2026-08-31 pagi: `ogis` (.8) ditemukan TERTINGGAL di sini sejak lahir 29/8
+# -- container-nya tak pernah ikut dihentikan sblm hibernate; sempat ditambahkan.
+# ⏸️ 2026-08-31 siang: ogis lalu DINONAKTIFKAN dari pipeline (permintaan user),
+# jadi .8 dikeluarkan lagi. Kalau ogis diaktifkan kembali, tambahkan balik
+# `10.66.66.8:maydualapan8` di sini DAN "Profile 11" di daftar patch exit_type
+# di bawah. Lihat catatan lengkap di wake-orchestrator.sh.
+NODES="10.66.66.50:warungbudina 10.66.66.60:balibruntattour 10.66.66.61:gogobuda65"
 
 say "=== SOP pra-hibernasi MULAI (dry-run=$DRY) ==="
 
@@ -64,11 +68,11 @@ if timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/nu
     # bikin Chrome nyatat exit_type="Crashed" -> pas dibuka lagi di wake, Chrome
     # AUTO-RESTORE sesi/tab lama (persis yg dikeluhkan user "sisa aplikasi kemarin
     # masih ada"). Makanya SETELAH proses benar2 mati, exit_type dipatch manual
-    # jadi "Normal" di file Preferences tiap profil Cloud Shell (Profile 10/26/29/11
-    # = yuni/gogobuda/balibruntattour/ogis; Profile 11 ditambahkan 31/8, ikut
-    # tertinggal sejak ogis lahir 29/8) — teknik standar cegah restore-prompt,
+    # jadi "Normal" di file Preferences tiap profil Cloud Shell (Profile 10/26/29
+    # = yuni/gogobuda/balibruntattour; "Profile 11"/ogis dikeluarkan 31/8 seiring
+    # ogis dinonaktifkan) — teknik standar cegah restore-prompt,
     # TAK menyentuh password/cookies/history, cuma flag housekeeping ini.
-    PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29","Profile 11")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'
+    PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'
     EB=$(printf '%s' "$PS_KILL" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
     timeout 25 ssh ltap-mini "powershell -NoProfile -EncodedCommand $EB" 2>&1 | grep -vE 'CLIXML|<Objs' | grep -iE 'chrome proc' | sed 's/^/    /'
   fi

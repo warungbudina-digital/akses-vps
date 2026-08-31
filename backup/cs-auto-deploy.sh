@@ -39,6 +39,9 @@ run_and_log() { "$1" 2>&1 | sed 's/^/[cs-auto-deploy] /' | tee -a "$LOG" >/dev/n
 run_and_log deploy_yuni
 run_and_log deploy_balibruntattour
 run_and_log deploy_gogobuda
-run_and_log deploy_ogis
+# ⏸️ 2026-08-31 (permintaan user): ogis dinonaktifkan dari pipeline (bukan
+# dihapus). Lihat catatan lengkap di wake-orchestrator.sh. Aktifkan lagi:
+# hapus tanda komentar baris di bawah.
+# run_and_log deploy_ogis
 
 log "cs-auto-deploy selesai."

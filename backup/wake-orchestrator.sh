@@ -99,7 +99,7 @@ if ! timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/
   exit 0
 fi
 rm -f "$STATE"
-log "laptop terjangkau -> mulai alur bertahap 4 profil (urutan: balibruntattour -> gogobuda -> yuni -> ogis)."
+log "laptop terjangkau -> mulai alur bertahap 3 profil (urutan: balibruntattour -> gogobuda -> yuni; ogis dinonaktifkan 2026-08-31)."
 
 # open_cs_profile <task-name-suffix> -> trigger task open-cs-<X> di laptop
 # via schtasks/run (InteractiveToken, WAJIB lewat Scheduled Task -- SSH
@@ -270,15 +270,16 @@ process_profile_with_retry() {
 # supaya laporan Telegram tak perlu nebak-nebak dari pola baris "!!! X
 # GAGAL" yg bisa muncul lebih dari sekali per run.
 # ---------------------------------------------------------------------
-STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"; STATUS_OGIS="BELUM DICOBA"
+STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"
+STATUS_OGIS="DINONAKTIFKAN"  # ⏸️ 2026-08-31, lihat catatan di blok ogis di bawah
 
 finish() {
-  log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI, ogis=$STATUS_OGIS ==="
-  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ] && [ "$STATUS_OGIS" = "OK" ]; then
-    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni+ogis semua sehat & jalan."
+  log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI ==="
+  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ]; then
+    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni semua sehat & jalan."
     exit 0
   fi
-  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI, ogis=$STATUS_OGIS. Detail: ~/wake-orchestrator.log (hub)."
+  notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI. Detail: ~/wake-orchestrator.log (hub)."
   exit 1
 }
 
@@ -306,13 +307,22 @@ case "$rc" in
   2) STATUS_YUNI="GAGAL (hard, retry habis)" ;;
 esac
 
-process_profile_with_retry "ogis" "maydualapan8@10.66.66.8" deploy_ogis 240 60
-rc=$?
-case "$rc" in
-  0) STATUS_OGIS="OK" ;;
-  1) STATUS_OGIS="GAGAL (soft, pasca-bootstrap)" ;;
-  2) STATUS_OGIS="GAGAL (hard, retry habis)" ;;
-esac
-log "ogis ini profil TERAKHIR -- tak ada lagi yg menyusul."
+# ⏸️ 2026-08-31 (permintaan user): ogis DINONAKTIFKAN dari pipeline — bukan
+# dihapus. Alasan: laptop cuma 2 core/1,4 GHz dan hari itu terbukti Chrome
+# tumbang saat memuat halaman Cloud Shell; turun 4->3 profil = satu tab berat
+# lebih sedikit di SATU proses Chrome yg dipakai bersama semua profil.
+# MENGAKTIFKAN LAGI: hapus blok komentar di bawah + `#OGIS# ` di baris lain,
+# Enable-ScheduledTask open-cs-ogis di laptop, kembalikan cron ogis-vault-backup,
+# dan kembalikan entri "ogis" di PROFILES (open-and-bootstrap-cs.py) +
+# ValidateSet (open-cs.ps1). deploy_ogis di lib-cs-deploy.sh SENGAJA dibiarkan
+# utuh (tak dipanggil, jadi tak mengganggu).
+# process_profile_with_retry "ogis" "maydualapan8@10.66.66.8" deploy_ogis 240 60
+# rc=$?
+# case "$rc" in
+#   0) STATUS_OGIS="OK" ;;
+#   1) STATUS_OGIS="GAGAL (soft, pasca-bootstrap)" ;;
+#   2) STATUS_OGIS="GAGAL (hard, retry habis)" ;;
+# esac
+log "yuni ini profil TERAKHIR -- tak ada lagi yg menyusul (ogis dinonaktifkan 2026-08-31)."
 
 finish
