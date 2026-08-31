@@ -35,8 +35,41 @@ CS_SSHOPTS=(-i "$CS_ADMIN_KEY" -o IdentitiesOnly=yes -o ConnectTimeout=6 -o Stri
 
 # reachable_cs <user@ip> -> 0/1, cek SSH cepat (bukan cuma ping, krn WG bisa
 # up tapi sshd di VM belum siap sesaat setelah bootstrap).
+#
+# ⚠️ 2026-08-31: versi lama `ssh ... true 2>/dev/null` MEMBUANG stderr, jadi
+# "Permission denied (publickey)" TAK BISA dibedakan dari "VM mati" -- keduanya
+# cuma muncul sbg "belum reachable" di log. Akibatnya kondisi kunci-admin-hilang
+# tersamar sbg recycle biasa (dikonfirmasi insiden 2026-08-30 22:40 WITA: node
+# ping OK + sshd menjawab, tapi kunci ditolak, dan tak seorang pun tahu).
+# Beda keduanya PENTING secara operasional:
+#   - VM mati        -> `Connection timed out`; menunggu wake berikutnya WAJAR.
+#   - kunci ditolak  -> VM masih HIDUP; menunggu TAK menyembuhkan apa pun,
+#                       node wajib di-bootstrap ulang (buka tab lagi).
+# Return code SENGAJA tak berubah (0 = reachable) supaya semua pemanggil lama
+# berperilaku persis sama; yg ditambah cuma peringatan eksplisit ke stderr,
+# dibatasi SEKALI per host per proses biar loop polling tak membanjiri log.
+CS_LAST_SSH_ERR=""
+
 reachable_cs() {
-  ssh "${CS_SSHOPTS[@]}" "$1" true 2>/dev/null
+  local host="$1" err rc=0 seen_var
+  # `|| rc=$?` wajib: lib ini di-source di skrip ber-`set -e`, tanpa itu
+  # assignment yg gagal akan mematikan seluruh skrip pemanggil.
+  err="$(ssh "${CS_SSHOPTS[@]}" "$host" true 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then CS_LAST_SSH_ERR=""; return 0; fi
+  CS_LAST_SSH_ERR="$err"
+  if printf '%s' "$err" | grep -qi 'permission denied'; then
+    seen_var="CS_KEYWARN_$(printf '%s' "$host" | tr -c 'A-Za-z0-9' '_')"
+    if [ -z "${!seen_var:-}" ]; then
+      {
+        echo "!!! $host: VM HIDUP tapi MENOLAK kunci admin (Permission denied)."
+        echo "    Ini BUKAN recycle biasa. Dugaan: watchdog kunci mati (PTY tab putus)"
+        echo "    sementara VM+wg0 terus hidup, lalu Cloud Shell me-reset /etc/ssh/keys."
+        echo "    Node ini butuh BOOTSTRAP ULANG -- menunggu tak akan menyembuhkannya."
+      } >&2
+      printf -v "$seen_var" '%s' 1
+    fi
+  fi
+  return "$rc"
 }
 
 # _locked_deploy <nama-profil> <nama-fungsi-impl> — SERIALISASI panggilan
