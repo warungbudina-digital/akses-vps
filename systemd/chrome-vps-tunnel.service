@@ -1,0 +1,25 @@
+[Unit]
+Description=SSH local-forward hub->CHROME-VPS KasmVNC (127.0.0.1:3060) for nginx reverse proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=warungbudina
+# Bind cuma di IP gateway bridge Docker (172.19.0.1) -- reachable dari
+# container nginx (akses-vps_app-net) TAPI tidak dari luar host sama sekali
+# (bukan 0.0.0.0). CHROME-VPS sendiri tetap bind 127.0.0.1 saja (tak diubah);
+# tunnel inilah satu-satunya jalur masuk, dan hanya jalan dari hub.
+ExecStart=/usr/bin/ssh -N \
+  -o StrictHostKeyChecking=accept-new \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 \
+  -o ServerAliveCountMax=3 \
+  -i /home/warungbudina/.ssh/chrome-vps-admin \
+  -o IdentitiesOnly=yes \
+  -L 172.19.0.1:13060:127.0.0.1:3060 \
+  warungbudina@10.122.31.254
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
