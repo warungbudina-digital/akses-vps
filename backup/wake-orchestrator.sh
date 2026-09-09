@@ -272,11 +272,14 @@ process_profile_with_retry() {
 # ---------------------------------------------------------------------
 STATUS_BALI="BELUM DICOBA"; STATUS_GOGO="BELUM DICOBA"; STATUS_YUNI="BELUM DICOBA"
 STATUS_OGIS="DINONAKTIFKAN"  # ⏸️ 2026-08-31, lihat catatan di blok ogis di bawah
+# STATUS_GOGO sejak 2026-09-09 SELALU "SKIP..." (lihat blok gogobuda di bawah) --
+# dikeluarkan dari gate sukses-penuh sama seperti STATUS_OGIS, cuma tetap
+# dicetak di ringkasan supaya jelas bukan lupa/gagal diam-diam.
 
 finish() {
   log "=== RINGKASAN AKHIR: balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI ==="
-  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_GOGO" = "OK" ] && [ "$STATUS_YUNI" = "OK" ]; then
-    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+gogobuda+yuni semua sehat & jalan."
+  if [ "$STATUS_BALI" = "OK" ] && [ "$STATUS_YUNI" = "OK" ]; then
+    notify "✅ wake-orchestrator SUKSES PENUH: balibruntattour+yuni semua sehat & jalan (gogobuda: $STATUS_GOGO)."
     exit 0
   fi
   notify "⚠️ wake-orchestrator SELESAI (tak semua sehat) -- balibruntattour=$STATUS_BALI, gogobuda=$STATUS_GOGO, yuni=$STATUS_YUNI. Detail: ~/wake-orchestrator.log (hub)."
@@ -287,17 +290,19 @@ process_profile_with_retry "balibruntattour" "balibruntattour@10.66.66.60" deplo
 rc=$?
 case "$rc" in
   0) STATUS_BALI="OK" ;;
-  1) STATUS_BALI="GAGAL (soft, pasca-bootstrap)"; log "balibruntattour soft-fail (laptop sudah beres bagiannya) -- LANJUT ke gogobuda." ;;
-  2) STATUS_BALI="GAGAL (hard, retry habis)"; log "balibruntattour hard-fail setelah semua retry -- LANJUT ke gogobuda (kebijakan baru 2026-08-28: tak lagi berhenti total)." ;;
+  1) STATUS_BALI="GAGAL (soft, pasca-bootstrap)"; log "balibruntattour soft-fail (laptop sudah beres bagiannya) -- LANJUT ke yuni." ;;
+  2) STATUS_BALI="GAGAL (hard, retry habis)"; log "balibruntattour hard-fail setelah semua retry -- LANJUT ke yuni (kebijakan 2026-08-28: tak lagi berhenti total)." ;;
 esac
 
-process_profile_with_retry "gogobuda" "gogobuda65@10.66.66.61" deploy_gogobuda 240 60
-rc=$?
-case "$rc" in
-  0) STATUS_GOGO="OK" ;;
-  1) STATUS_GOGO="GAGAL (soft, pasca-bootstrap)"; log "gogobuda soft-fail (laptop sudah beres bagiannya) -- LANJUT ke yuni." ;;
-  2) STATUS_GOGO="GAGAL (hard, retry habis)"; log "gogobuda hard-fail setelah semua retry -- LANJUT ke yuni." ;;
-esac
+# gogobuda (.61) DIHENTIKAN dari siklus wake 2026-09-09: satu-satunya peran node
+# ini adalah host n8n-uploader (lihat deploy_gogobuda di lib-cs-deploy.sh), dan
+# n8n gogobuda SUDAH DIPINDAH permanen ke CHROME-VPS (idcloudhost 10.122.31.254,
+# persisten 24/7, LAN langsung ke DB-VPS tanpa hop WireGuard -- lihat
+# project_n8n_gogobuda_gui_stuck.md / project_chrome_vps_cookie_station.md).
+# Tak ada lagi alasan bangunkan Cloud Shell .61 tiap siklus wake. Fungsi
+# deploy_gogobuda di lib-cs-deploy.sh DIBIARKAN utuh (referensi/rollback),
+# cuma tak dipanggil lagi di sini.
+STATUS_GOGO="SKIP (dipindah ke CHROME-VPS 9/9)"
 
 process_profile_with_retry "yuni" "warungbudina@10.66.66.50" deploy_yuni 240 60
 rc=$?

@@ -106,15 +106,20 @@ services:
 
   cloudflared-n8n:
     # (2026-08-25) Tunnel TERPISAH dari cloudflared di atas -- khusus
-    # n8n.obc-crypto.com, proxy LANGSUNG ke n8n-uploader di VM Cloud Shell
-    # gogobuda (10.66.66.61:5678 via WireGuard), BUKAN lewat nginx (beda host,
-    # bukan container lokal di stack ini). Ingress rule dikonfigurasi lewat
-    # Cloudflare API (tunnel id 9505b522-..., nama tunnel "n8n" -- reuse
-    # tunnel lama yg sempat dibuat 6 Juni 2026, ingress-nya diupdate dari
-    # target basi "n8n-n8n-1:5678" ke IP WG yg benar). Auth publik ditangani
-    # n8n sendiri (N8N_BASIC_AUTH_ACTIVE=true), bukan di layer tunnel ini.
-    # network_mode host TIDAK dipakai -- default bridge cukup, container bisa
-    # reach 10.66.66.61 lewat NAT egress host (terverifikasi live 25/8).
+    # n8n.obc-crypto.com, proxy LANGSUNG ke n8n-uploader, BUKAN lewat nginx
+    # (beda host, bukan container lokal di stack ini). Ingress rule
+    # dikonfigurasi lewat Cloudflare API (tunnel id 9505b522-..., nama tunnel
+    # "n8n" -- reuse tunnel lama 6 Juni 2026).
+    # ⚠️ 2026-09-09: target DIPINDAH dari VM Cloud Shell gogobuda
+    # (10.66.66.61:5678 via WireGuard, ephemeral & sering unreachable) ke
+    # CHROME-VPS (10.122.31.254:5678, idcloudhost, persisten 24/7) -- alasan:
+    # stabilitas (lihat project_n8n_gogobuda_gui_stuck.md), DAN CHROME-VPS
+    # satu subnet LAN privat dgn DB-VPS (tanpa hop WireGuard sama sekali,
+    # menghindari kelas bug MTU-blackhole yg sempat bikin n8n hang senyap).
+    # Auth publik ditangani n8n sendiri (akun owner), bukan di layer tunnel
+    # ini. network_mode host TIDAK dipakai -- default bridge cukup, container
+    # bisa reach 10.122.31.254 lewat NAT egress host (hub punya NIC langsung
+    # di subnet 10.122.31.0/24, terverifikasi live 9/9).
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     mem_limit: 64m
