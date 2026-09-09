@@ -203,6 +203,34 @@ _deploy_gogobuda_impl() {
     echo ".61 (gogobuda) belum reachable."
     return 1
   fi
+
+  # Fast-path (2026-09-09 fix): kalau n8n SUDAH running+healthz 200, JANGAN
+  # full-redeploy (git pull + docker build + compose up --build) lagi -- ini
+  # akar masalah lama "GUI n8n selalu 'n8n is starting up. Please wait'"
+  # (lihat project_n8n_gogobuda_gui_stuck.md kandidat #2, terkonfirmasi live
+  # 2026-09-09): cron cs-auto-deploy.sh (*/5mnt) memanggil fungsi ini TANPA
+  # fast-path apa pun, dan `deploy_stack()` di scripts/v2/deploy.sh SELALU
+  # `docker compose up -d --build` tanpa syarat -- build ulang tiap tick
+  # menghasilkan image dgn digest BEDA (diverifikasi: manifest sha256 beda
+  # antar-run walau semua layer CACHED), jadi compose recreate+SIGTERM
+  # container n8n tiap 5 menit, sebelum sempat selesai render UI penuh ->
+  # loop abadi "starting up" walau /healthz sendiri 200. Skip total (nol SSH
+  # tambahan) kalau sudah sehat -- konsisten pola deploy_yuni/bring-up-
+  # browser.sh yg SUDAH py fast-path serupa.
+  local n8n_healthy
+  n8n_healthy="$(ssh "${CS_SSHOPTS[@]}" "$host" '
+    st=$(docker inspect -f "{{.State.Status}}" n8n 2>/dev/null || echo none)
+    if [ "$st" = "running" ]; then
+      curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:5678/healthz 2>/dev/null || echo 000
+    else
+      echo none
+    fi
+  ' 2>/dev/null)"
+  if [ "$n8n_healthy" = "200" ]; then
+    echo ".61 n8n-uploader SUDAH jalan sehat (container running, /healthz 200) -> skip redeploy."
+    return 0
+  fi
+
   if [ ! -f "$cred" ] || [ ! -f "$oauth" ]; then
     echo ".61 (gogobuda) reachable TAPI kredensial belum lengkap ($cred / $oauth) - skip deploy."
     return 1
