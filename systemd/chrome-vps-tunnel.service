@@ -1,5 +1,5 @@
 [Unit]
-Description=SSH local-forward hub->CHROME-VPS KasmVNC (127.0.0.1:3060) for nginx reverse proxy
+Description=SSH local-forward hub->CHROME-VPS KasmVNC (127.0.0.1:3060, profil balibruntattour) for nginx reverse proxy
 After=network-online.target
 Wants=network-online.target
 
@@ -9,6 +9,19 @@ User=warungbudina
 # container nginx (akses-vps_app-net) TAPI tidak dari luar host sama sekali
 # (bukan 0.0.0.0). CHROME-VPS sendiri tetap bind 127.0.0.1 saja (tak diubah);
 # tunnel inilah satu-satunya jalur masuk, dan hanya jalan dari hub.
+#
+# ⚠️ Port TARGET (127.0.0.1:xxxx di CHROME-VPS) di-HARDWIRE ke 1 profil pada
+# satu waktu (desain on-demand, cuma 1 profil biasa aktif). Diubah 11/9 dari
+# 3060 (balibruntattour) -> 3080 (maydualapan) utk keperluan login Gmail
+# maydualapan8 manual via noVNC — TUNTAS (11 cookies google.com/youtube.com/
+# accounts.google.com terekspor, verified), DIKEMBALIKAN ke 3060
+# (balibruntattour, profil default) sesuai catatan "jangan lupa balikin".
+# Kalau ganti profil lain lagi, cukup ganti port di baris -L bawah (tabel
+# port di README chromium-cookie-station: yuni=3050 balibruntattour=3060
+# gogobuda=3070 maydualapan=3080 sahabat-nutrilite=3090) lalu `sudo
+# systemctl daemon-reload && sudo systemctl restart chrome-vps-tunnel`.
+# Port LOKAL 13060 (sisi hub) SENGAJA TAK diubah - itu cuma nomor port
+# lokal internal, tak perlu match profil.
 ExecStart=/usr/bin/ssh -N \
   -o StrictHostKeyChecking=accept-new \
   -o ExitOnForwardFailure=yes \
