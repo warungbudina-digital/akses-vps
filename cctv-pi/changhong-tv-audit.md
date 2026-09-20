@@ -2,6 +2,8 @@
 
 > Diaudit 2026-08-24 dari Pi 4B (`ssh pi4b`, `wlan0` di WiFi "ruang tamu" — lihat [[project_rpi4b_setup]]). Subnet sama dgn DVR Hikvision [[project_pi_cctv_audit]] & modem ZTE [[project_zte_modem_audit]].
 
+> **Status per 2026-09-20:** TV sudah **OTA ke Android 14** (lihat seksi OTA di bawah). IP DHCP **bergeser** (`.234` ↔ `.220`) — script `tvctl.sh` cari otomatis lewat MAC. Identitas/versi di tabel bawah = kondisi saat audit awal (pra-OTA); nilai Android 11/patch 2025 sudah usang.
+
 ## Identitas device
 | | |
 |---|---|
@@ -61,6 +63,21 @@ Wrapper ADB reusable, jalankan **di Pi 4B** (adb key Pi ter-otorisasi + satu LAN
 3. **`vol`/`set` wajib argumen eksplisit** — dulu `vol` tanpa angka diam-diam set volume ke 3 (default step-count). Sekarang error + exit 1 sebelum connect.
 
 Kode keluar: `0`=sukses/wake, `2`=gagal wake (remote-off/mati-penuh), `3`=unauthorized (approve popup di layar TV), `10`=TV tak di jaringan, `11`=ADB unauthorized, `13`=standby-dalam (offline).
+
+
+## Standby & wake jarak jauh — Energy Mode (akar masalah + fix, 2026-09-20)
+
+**Gejala:** `tvctl.sh off` (keyevent 26) membuat standby yg ADB-nya awalnya tetap hidup, TAPI setelah standby beberapa saat TV **lepas total dari jaringan** (ping mati, adb `offline`/hilang dari neigh) → `tvctl.sh on` gagal, WoL tak direspons → butuh remote fisik.
+
+**Akar masalah (ditemukan via `dumpsys power`):**
+- TV pakai **Ethernet `eth0`** (`wifi_on=0`; active default network = ETHERNET). Yg mati saat standby = NIC Ethernet, bukan WiFi.
+- **Low Power Standby** aktif: `mIsEnabled=true`, `mStandbyTimeoutConfig=5000` (aktif **5 detik** setelah idle+layar mati). Energy Mode default TV = **"Low"** → `mIdentifier=low_energy_use`, `mAllowedFeatures=...NON_NETWORKED_STANDBY_FEATURES` → jaringan+adbd dimatikan ~5s setelah standby. `network_wol=1`/`network_wow=1` ada tapi sia-sia (NIC di-suspend total).
+
+**Fix (TERUJI):** ubah **Energy Mode → "Optimized" (Networked Standby)** di `Settings → System → Power & Energy → Energy saver`, atau via ADB buka `com.android.tv.settings/.device.eco.EnergyModesActivity` lalu DPAD_DOWN→DPAD_CENTER (leanback: pakai DPAD, bukan tap). Policy berubah `low_energy_use` → **`moderate_energy_use`** dgn `NETWORKED_STANDBY_FEATURES` + `com.android.lowpowerstandby.WAKE_ON_LAN`.
+- ⚠️ **WAJIB REBOOT TV** agar mode baru berlaku penuh. **Sebelum reboot** mode baru TIDAK efektif (network tetap mati di 35s). **Sesudah `adb reboot`**: uji `off`→tunggu 40s→**ping 5/5 hidup, `tvctl on`→Awake BERHASIL**. Setelan persisten lintas reboot.
+- 3 mode tersedia: **Low/Standby** (`low_energy_use`, hemat, network mati di standby), **Optimized/Networked Standby** (`moderate_energy_use`, seimbang — REKOMENDASI), **Increased/Always connected** (paling boros, wake tercepat).
+
+**SOP kontrol jarak jauh (pasca-fix):** matikan selalu via `~/bin/tv off` (BUKAN remote fisik) → standby yg network-nya tetap hidup → `~/bin/tv on` kapan pun berhasil. (Soak berjam-jam / Doze sangat dalam belum diuji, tapi sudah lewat titik aktivasi LPS 5s yg dulu jadi pembunuh.)
 
 
 ## 🎉 Temuan besar: OTA System Upgrade tersedia — Android 11 → 14
