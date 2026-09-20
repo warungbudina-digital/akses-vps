@@ -45,6 +45,24 @@
 
 **Catatan reusable:** SETELAH toggle "USB debugging" TV kembali OFF (atau TV reboot), port 5555 akan tertutup lagi — perlu aktifkan ulang toggle-nya di TV kalau mau akses ADB lagi nanti. Sertifikat otorisasi ADB Pi (`~/.android/adbkey`) kemungkinan tetap tersimpan di TV kalau user pilih "Always allow" saat approve, jadi popup approve mungkin tak muncul lagi di percobaan berikutnya (perlu diverifikasi ulang sesi depan).
 
+## Script kontrol `tvctl.sh` (operasional, di `pi4b:~/tvctl.sh`)
+
+Wrapper ADB reusable, jalankan **di Pi 4B** (adb key Pi ter-otorisasi + satu LAN dgn TV). Aksi: `on | off | toggle | wol | voldown [N] | volup [N] | vol <0-100> | mute | status`. Wrapper hub `akses-vps:~/bin/tv` → `ssh pi4b ~/tvctl.sh $*`. Salinan di repo: [`tvctl.sh`](tvctl.sh).
+
+**Poin desain penting:**
+- IP TV **DHCP bergeser** (`.234` ↔ `.220`) → `find_ip()` cari otomatis lewat MAC `ac:ac:e2:52:1f:a7` (`ip neigh`), plus kandidat statis + WG `10.66.66.12`, HANYA terima yg ping-nya hidup.
+- Volume ASLI dibaca dari `dumpsys audio` STREAM_MUSIC `streamVolume` (skala 0-100). **`settings get system volume_music` PALSU/statis (selalu 5)** di TV MediaTek ini — jangan dipakai. Terbukti 1 tekan keyevent = 1 unit skala.
+- Wakefulness dibaca dari `dumpsys power` (`mWakefulness`). POWER = `keyevent 26`.
+- **ADB hanya bisa membangunkan TV dari standby DANGKAL** (dimatikan via `off`/keyevent 26 → WiFi+adbd tetap hidup). Kalau TV dimatikan via **remote fisik** (standby-dalam → `offline`) atau mati-penuh (ping gagal) → **tak ada jalur wake via ADB**; fallback WoL disediakan (`wol`) tapi belum terbukti wake dari mati-penuh. **SOP: kalau mau bisa `on` dari jarak jauh, matikan pakai `tv off`, BUKAN remote.**
+
+**Fix hardening (diaudit + diuji live 2026-09-20):**
+1. **`on` tak lagi bisa MEMATIKAN TV yang Awake.** Dulu `[ wake = Awake ] || key 26` → kalau `dumpsys power` gagal-baca (string kosong) padahal TV nyala, POWER malah terkirim → TV mati (kebalikan `on`). Sekarang helper `wake_if_asleep()`: POWER **hanya** dikirim bila state eksplisit `Asleep/Dozing/Dreaming`; kosong/tak dikenal → tidak sentuh + log peringatan. Unit-test 5 kasus lolos (kosong→0 POWER, Asleep/Dozing→1, Awake/garbage→0).
+2. **`find_ip()` anti salah-device saat DHCP geser.** Kandidat statis `.234/.220` kini wajib lolos `mac_ok()` (`ip neigh show <ip>` memetakan balik ke MAC TV) setelah ping — cegah `adb connect` ke perangkat lain yg kebetulan pegang IP itu & membalas ping. Entri by-MAC dari `ip neigh` (otoritatif) tetap dicoba duluan; WG `10.66.66.x` dikecualikan (beda L2). Terbukti live: TV `.234` diterima, router `.1` (MAC beda) DITOLAK.
+3. **`vol`/`set` wajib argumen eksplisit** — dulu `vol` tanpa angka diam-diam set volume ke 3 (default step-count). Sekarang error + exit 1 sebelum connect.
+
+Kode keluar: `0`=sukses/wake, `2`=gagal wake (remote-off/mati-penuh), `3`=unauthorized (approve popup di layar TV), `10`=TV tak di jaringan, `11`=ADB unauthorized, `13`=standby-dalam (offline).
+
+
 ## 🎉 Temuan besar: OTA System Upgrade tersedia — Android 11 → 14
 
 Field `has_update:false` di DIAL `/setup/eureka_info` **MENYESATKAN** — itu cuma status firmware Cast/Chromecast, BUKAN status OS Android penuh. Saat halaman System Update dibuka via ADB, ternyata ada **upgrade OS besar tersedia**:
