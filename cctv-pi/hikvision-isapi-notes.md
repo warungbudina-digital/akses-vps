@@ -71,3 +71,12 @@ Nama OSD tiap channel diset via `PUT /ISAPI/System/Video/inputs/channels/<id>` (
 | ch10 | Arah Tempat Bakar Sampah |
 
 ch6, ch11-16 = kosong (tak ada kamera). Nama lama semula generik "Camera NN" (mudah dikembalikan bila perlu).
+
+## Health-check Camera 08 (ch8 "Arah Kantor") — hitam saat malam, 2026-09-20
+Keluhan: layar hitam tiap modus malam. Hasil audit + diagnosa:
+- **Siang (17:09):** snapshot `/ISAPI/Streaming/channels/801/picture` jernih & normal, `resDesc=960*1080` → kamera+kabel+channel DVR sehat di terang.
+- **Config DVR bukan penyebab:** Image ch8 identik ch7 sehat (Color 128, sharpness 5); `/ISAPI/Image/channels/8/supplementLight` KOSONG; ISPMode/DayNightFilter/ircutFilter/exposure/WDR/gain/BLC semua 403 → DVR TAK punya kontrol IR/day-night utk kamera analog Turbo-HD (dikontrol kamera sendiri).
+- **Reset sisi-DVR tak berpengaruh:** endpoint `Image/channels/8/{defaultConfig,reset}` = 403; toggle `videoInputEnabled` false→true = HTTP 200 tapi statusString "Reboot Required" (bukan reset live).
+- **Reboot DVR (`PUT /ISAPI/System/reboot`, OK):** turun ~24s, ISAPI balik ~60s, ch7/ch9 pulih normal — TAK memperbaiki ch8.
+- **🔴 Tertangkap live MALAM (21:03):** ch8 `resDesc=NO VIDEO` + snapshot hitam 8KB, sedangkan ch7/ch9 tetap `960*1080`. **NO VIDEO = SINYAL HILANG total saat malam (bukan gambar-gelap-resolusi-valid)** → diagnosa terkuat **BROWN-OUT DAYA**: IR LED nyala saat gelap → arus naik → adaptor/kabel 12V marginal tak sanggup → kamera drop sinyal.
+- **FIX (fisik, prioritas):** (1) ganti adaptor 12V ch8 dgn yg lebih kuat/known-good; (2) cek kabel+konektor (drop tegangan); (3) kalau daya OK tapi tetap NO VIDEO → board IR kamera rusak → ganti unit. **Verifikasi:** cek siang berikutnya — video balik = konfirmasi malam-spesifik/brown-out; tetap NO VIDEO siang = koneksi/kamera putus.
