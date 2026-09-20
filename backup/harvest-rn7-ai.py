@@ -185,24 +185,25 @@ def harvest_gemini(client, max_new, force):
         pass
     time.sleep(9)
     console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
-    # HARDEN 2026-09-20: tunggu SPA Gemini BENAR-BENAR ter-hidrasi sebelum
-    # membaca daftar. Tepat setelah Fennec di-restart oleh ensure_rdp, tombol
-    # 'Menu utama' sering belum ada dlm sleep tetap 9s -> dulu langsung
-    # dinyatakan "TAK BISA DIBACA" & sumber gemini gagal (tak menggagalkan
-    # sumber lain, tapi arsip gemini jadi kosong). Poll keberadaan tombol menu
-    # / link percakapan; kalau belum muncul: TUNGGU & poll ulang s/d 6x
-    # (reload cuma sekali di tengah - lihat catatan di dalam loop).
+    # ⚠️⚠️ GEMINI GANTI UI (ditemukan+diverifikasi 2026-09-20 dgn membaca DOM
+    # nyata). Pembuka daftar riwayat BUKAN LAGI [aria-label="Menu utama"] (label
+    # itu SUDAH TIDAK ADA) melainkan [aria-label="Buka sidebar"] (EN: "Open side
+    # panel"/"Open sidebar"). Inilah biang gemini gagal beruntun 20/9 - BUKAN
+    # soal hidrasi (halaman ter-render & AKUN TETAP LOGIN, cuma selector usang).
+    # Semua selector di adapter ini kini pakai daftar OPENER (label baru dulu,
+    # label lama sbg fallback kalau Gemini A/B-test balik). Kalau gemini "0/tak
+    # bisa dibaca" lagi ke depan: DUMP aria-label tombol dulu, jangan tebak.
     #
-    # ⚠️ BATAS NYATA (diuji 20/9): kalau Fennec BENAR-BENAR dingin + RN7 sibuk
-    # (mis. tepat sesudah ensure_rdp me-restart Fennec), SPA Gemini kadang tetap
-    # tak ter-hidrasi dlm ~85s -> tetap gagal (~50-50). Itu batas Gemini, bukan
-    # bug: harvest tetap lapor ERROR EKSPLISIT (bukan 0 palsu) & sumber lain
-    # jalan terus. Di cron normal Fennec TAK di-restart (tab hidup berjam-jam)
-    # jadi Gemini biasanya aman.
+    # Lapisan tunggu-hidrasi di bawah TETAP berguna (SPA Gemini lambat, apalagi
+    # pasca Fennec cold-restart): poll s/d 6x, reload SEKALI di tengah. JANGAN
+    # reload tiap ulangan (membuang progres hidrasi). Tetap bedakan "kosong" vs
+    # "buta" -> error eksplisit, bukan 0 palsu.
     for att in range(1, 7):
         ready = js_json(client, console, """
-          const ok = !!(document.querySelector('[aria-label="Menu utama"]')
-                     || document.querySelector('[aria-label="Main menu"]')
+          const OPENER = ['[aria-label="Buka sidebar"]','[aria-label="Open side panel"]',
+                          '[aria-label="Open sidebar"]','[aria-label="Main menu"]',
+                          '[aria-label="Menu utama"]'];
+          const ok = !!(OPENER.map(s=>document.querySelector(s)).find(Boolean)
                      || document.querySelector('a[href^="/app/"]'));
           window.__rdp_out = JSON.stringify({ready: ok});
         """, timeout=30).get("ready")
@@ -224,13 +225,17 @@ def harvest_gemini(client, max_new, force):
         else:
             log(f"gemini: menunggu hidrasi SPA... ({att}/6)")
             time.sleep(8)
-    # Buka MENU UTAMA lalu baca daftarnya DALAM SATU panggilan JS.
-    # ⚠️ Jangan dipisah jadi 2 panggilan: menunya keburu tertutup di antara
+    # Buka SIDEBAR lalu baca daftarnya DALAM SATU panggilan JS.
+    # ⚠️ Jangan dipisah jadi 2 panggilan: sidebar keburu tertutup di antara
     # keduanya sehingga daftar terbaca 0 (akun tampak kosong padahal ada) -
     # jebakan nyata saat pengujian.
-    # Tombolnya `[aria-label="Menu utama"]`; `side-nav-sparkle-button`
-    # ("Buka sidebar") TIDAK memunculkan seksi "Terbaru".
+    # Tombolnya kini `[aria-label="Buka sidebar"]` (lihat catatan GANTI UI di
+    # atas); label lama dipertahankan sbg fallback.
     lst = js_json(client, console, """
+      const OPENER = ['[aria-label="Buka sidebar"]','[aria-label="Open side panel"]',
+                      '[aria-label="Open sidebar"]','[aria-label="Main menu"]',
+                      '[aria-label="Menu utama"]'];
+      const findOpener = () => OPENER.map(s=>document.querySelector(s)).find(Boolean) || null;
       const bacaLink = () => {
         const links = [...document.querySelectorAll('a[href^="/app/"]')]
           .map(a => ({id: (a.getAttribute('href')||'').split('/app/')[1],
@@ -240,31 +245,40 @@ def harvest_gemini(client, max_new, force):
         for (const l of links) { if (!seen.has(l.id)) { seen.add(l.id); out.push(l); } }
         return out;
       };
-      // Menu utama itu TOGGLE: kalau daftar sudah tampak, JANGAN diklik lagi
-      // (klik kedua menutupnya -> daftar terbaca 0 dan akun tampak kosong).
-      // SPA Gemini butuh waktu hidrasi setelah navigasi: tombol menu bisa
-      // BELUM ADA saat percobaan pertama. Coba beberapa kali, dan klik HANYA
-      // kalau daftar memang belum tampak (menu bersifat toggle).
+      // Sidebar itu TOGGLE: klik HANYA kalau daftar belum tampak.
+      // ⚠️ UI mobile Gemini (mat-drawer-over) MENGABAIKAN klik sintetis via RDP
+      // (diverifikasi 20/9: .click() & dispatch MouseEvent penuh tak membuka
+      // drawer). Kita tetap coba klik+dispatch (best-effort, kalau Gemini ubah
+      // lagi bisa jalan) TAPI kebenaran dibaca dari STATUS DRAWER, bukan "0 link".
+      const tap = (el) => {
+        if (!el) return;
+        const t = el.closest('button') || el;
+        try { t.click(); } catch(e){}
+        for (const ty of ['pointerdown','mousedown','pointerup','mouseup','click'])
+          t.dispatchEvent(new MouseEvent(ty,{bubbles:true,cancelable:true,view:window}));
+      };
       let items = bacaLink();
       for (let att = 0; att < 4 && !items.length; att++) {
-        const b = document.querySelector('[aria-label="Menu utama"]')
-               || document.querySelector('[aria-label="Main menu"]');
-        if (b) b.click();
+        tap(findOpener());
         await new Promise(r => setTimeout(r, 4000));
         items = bacaLink();
       }
-      // Bedakan "daftar memang kosong" dari "tak bisa dibaca". Tanpa ini,
-      // halaman yg gagal hidrasi melaporkan 0 dan TAMPAK sehat padahal
-      // sebenarnya buta - bug senyap yg paling berbahaya di pipeline ini.
-      const menuAda = !!(document.querySelector('[aria-label="Menu utama"]')
-                      || document.querySelector('[aria-label="Main menu"]'));
-      window.__rdp_out = JSON.stringify({n: items.length, items, menuAda});
+      // Status drawer riwayat: pembeda "akun kosong" (drawer TERBUKA tapi nol
+      // percakapan) dari "BUTA" (drawer tak mau terbuka). Tanpa ini halaman buta
+      // melaporkan 0 & TAMPAK sehat - bug senyap paling berbahaya di pipeline.
+      const nav = document.querySelector('mat-sidenav');
+      const drawerOpened = !!(nav && nav.classList.contains('mat-drawer-opened'));
+      window.__rdp_out = JSON.stringify({n: items.length, items,
+                                         openerAda: !!findOpener(), drawerOpened});
     """, timeout=90)
     items = lst.get("items", [])
-    if not items and not lst.get("menuAda"):
-        # Halaman tak ter-render penuh -> JANGAN laporkan "0" seolah akun kosong.
-        raise RuntimeError("daftar Gemini TAK BISA DIBACA (tombol 'Menu utama' tak ada - "
-                           "halaman belum ter-render penuh). Bukan berarti akun kosong.")
+    # Hanya percaya "0 percakapan" kalau daftar benar bisa dibaca: ada link ATAU
+    # drawer riwayat BENAR-BENAR terbuka (berarti kosong asli). Selain itu -> BUTA.
+    if not items and not lst.get("drawerOpened"):
+        raise RuntimeError(
+            "daftar Gemini TAK BISA DIBACA: drawer riwayat tak terbuka via klik "
+            "(UI mobile Gemini mat-drawer menolak klik sintetis - perlu adb-tap "
+            "OS-level / viewport desktop; atau opener hilang). BUKAN akun kosong.")
     log(f"gemini: {len(items)} percakapan terlihat di daftar 'Terbaru'")
 
     # Gemini tak memberi timestamp di daftar -> dedup pakai KEBERADAAN id saja.
