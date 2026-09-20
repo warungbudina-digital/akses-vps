@@ -48,7 +48,7 @@ ensure_rdp, js_json, sh = cg.ensure_rdp, cg.js_json, cg.sh
 ADB, RN7, FENNEC, RDP_PORT = cg.ADB, cg.RN7, cg.FENNEC, cg.RDP_PORT
 
 
-def open_tab(client, url_match, url_open, tries=3):
+def open_tab(client, url_match, url_open, tries=5):
     """Cari tab yg URL-nya memuat `url_match`; buka `url_open` kalau belum ada.
 
     HARDEN 2026-09-20: jam 05:00 (load RN7 tinggi / Fennec baru di-restart oleh
@@ -185,6 +185,45 @@ def harvest_gemini(client, max_new, force):
         pass
     time.sleep(9)
     console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
+    # HARDEN 2026-09-20: tunggu SPA Gemini BENAR-BENAR ter-hidrasi sebelum
+    # membaca daftar. Tepat setelah Fennec di-restart oleh ensure_rdp, tombol
+    # 'Menu utama' sering belum ada dlm sleep tetap 9s -> dulu langsung
+    # dinyatakan "TAK BISA DIBACA" & sumber gemini gagal (tak menggagalkan
+    # sumber lain, tapi arsip gemini jadi kosong). Poll keberadaan tombol menu
+    # / link percakapan; kalau belum muncul: TUNGGU & poll ulang s/d 6x
+    # (reload cuma sekali di tengah - lihat catatan di dalam loop).
+    #
+    # ⚠️ BATAS NYATA (diuji 20/9): kalau Fennec BENAR-BENAR dingin + RN7 sibuk
+    # (mis. tepat sesudah ensure_rdp me-restart Fennec), SPA Gemini kadang tetap
+    # tak ter-hidrasi dlm ~85s -> tetap gagal (~50-50). Itu batas Gemini, bukan
+    # bug: harvest tetap lapor ERROR EKSPLISIT (bukan 0 palsu) & sumber lain
+    # jalan terus. Di cron normal Fennec TAK di-restart (tab hidup berjam-jam)
+    # jadi Gemini biasanya aman.
+    for att in range(1, 7):
+        ready = js_json(client, console, """
+          const ok = !!(document.querySelector('[aria-label="Menu utama"]')
+                     || document.querySelector('[aria-label="Main menu"]')
+                     || document.querySelector('a[href^="/app/"]'));
+          window.__rdp_out = JSON.stringify({ready: ok});
+        """, timeout=30).get("ready")
+        if ready:
+            break
+        # SPA Gemini berat: hidrasi berlangsung SENDIRI seiring waktu. Reload
+        # tiap ulangan (versi awal harden) justru MEMBUANG progres hidrasi &
+        # memaksa Fennec (baru cold-restart + sibuk VN) mulai dr nol -> malah
+        # tak pernah selesai. Strategi benar: cukup TUNGGU & poll ulang; reload
+        # SEKALI di tengah saja kalau benar-benar macet (mis. tab nyangkut).
+        if att == 3:
+            log("gemini: masih belum ter-hidrasi - reload sekali + tunggu...")
+            try:
+                client.eval_js(console, "location.reload();", timeout=10)
+            except Exception:
+                pass
+            time.sleep(15)
+            console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
+        else:
+            log(f"gemini: menunggu hidrasi SPA... ({att}/6)")
+            time.sleep(8)
     # Buka MENU UTAMA lalu baca daftarnya DALAM SATU panggilan JS.
     # ⚠️ Jangan dipisah jadi 2 panggilan: menunya keburu tertutup di antara
     # keduanya sehingga daftar terbaca 0 (akun tampak kosong padahal ada) -
