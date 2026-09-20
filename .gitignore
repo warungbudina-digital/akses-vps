@@ -69,3 +69,5 @@ wireguard/bootstraps/
 # Python
 __pycache__/
 *.pyc
+# rn7.obc-crypto.com password hash - secret, not code (sejajar .htpasswd-editor)
+nginx/snippets/.htpasswd-rn7
