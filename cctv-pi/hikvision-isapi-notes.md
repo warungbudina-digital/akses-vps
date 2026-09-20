@@ -54,3 +54,20 @@ Channel ID pattern: `101`=ch1 main stream, `201`=ch2, ..., `1001`=ch10 (`(channe
 ## Info tambahan berguna
 - **DNS device ini `192.168.1.1` BUKAN sisa basi** — itu DNS server pusat (kemungkinan Pi-hole/AdGuard) yg dipakai LINTAS SEMUA WiFi di rumah ini (Pi sendiri dpt DNS sama dr DHCP "ruang tamu", terbukti resolve `google.com` sukses). **Jangan buru-buru curiga "stale config" cuma krn IP-nya beda subnet dari device** — verifikasi dulu apakah itu genuinely functioning resolver (`dig @<ip> <hostname>`) sebelum "memperbaiki" sesuatu yg sebenarnya sudah benar. (Pelajaran dari kesalahan diagnosa sesi ini sendiri — sempat coba "fix" DNS yg ternyata tak rusak.)
 - Interface `addressingType:dynamic` (DHCP) → PUT ke `ipAddress`/DNS fields DITERIMA (`statusCode:1 OK`) tapi **DIAM-DIAM TAK PERSISTEN** (kalah oleh DHCP renewal berikutnya) — kalau memang perlu override static, harus ubah `addressingType` ke `static` dulu, PUT langsung ke field DNS saat mode dynamic itu percuma (tak error, tapi juga tak nempel).
+
+## Pemetaan kamera → lokasi (channel labels, 2026-09-20)
+Nama OSD tiap channel diset via `PUT /ISAPI/System/Video/inputs/channels/<id>` (GET → ubah `<name>` → PUT verbatim → verify GET; batas nama ~32 char). Diverifikasi 9/9 HTTP 200 statusString OK.
+
+| Channel | Label / Lokasi |
+|---|---|
+| ch1 | Arah Dapur dan Kamar Mandi |
+| ch2 | Arah Mrajan |
+| ch3 | Arah parkir halaman |
+| ch4 | Arah Ruang tamu |
+| ch5 | Arah rumah pak Arsa |
+| ch7 | Depan pintu gerbang |
+| ch8 | Arah Kantor ⚠️ (hitam saat malam — isu IR hardware kamera, lihat project_pi_cctv_audit) |
+| ch9 | Arah Tugu karang |
+| ch10 | Arah Tempat Bakar Sampah |
+
+ch6, ch11-16 = kosong (tak ada kamera). Nama lama semula generik "Camera NN" (mudah dikembalikan bila perlu).
