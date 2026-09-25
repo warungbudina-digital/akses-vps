@@ -158,6 +158,12 @@ video memberi statistik lengkap (SSR). Waktu unggah juga bisa dari ID (`id >> 32
   lama → sekarang tunggu sampai URL cocok target + cek handle/ID hasil = target.
 - **Carousel foto** (Photo Mode) durasinya 0 → dicatat `media_type=photo`, durasi NULL.
 - Akun tak ada: embed `isError:true`. CAPTCHA → run berhenti (exit 2), bukan dipaksa.
+- **Profil remote-cdp .60 berbagi SATU halaman** & video autoplay yg ditinggal membuat
+  .60 150% CPU → collector `quiet()` (pause+kosongkan `<video>`) tiap video dan `park()`
+  tab ke about:blank di akhir run. Kalau tetap lambat: restart container browser .60.
+- `wait` kadang 500 saat TikTok redirect internal → diulang 3×; error per-video tak
+  menggagalkan akun. `resource-block` API tak bisa dipakai via HTTP (schema buang `types`).
+- Video "not available in your country" = diblokir wilayah IP .60 (Singapura), bukan error.
 - Status per akun membedakan `ok`/`no_videos` (terukur) dari `captcha`/`error`/`not_found`
   (gagal mengukur) — laporan menampilkan kesehatan pengumpulan di bagian atas.
 

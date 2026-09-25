@@ -73,7 +73,8 @@ JS_VIDEO = r"""() => {
     const scope = JSON.parse(document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__').textContent).__DEFAULT_SCOPE__ || {};
     const d = scope['webapp.video-detail'];
     const it = d && d.itemInfo && d.itemInfo.itemStruct;
-    if (!it) return { captcha, err: 'no itemStruct', statusCode: d ? d.statusCode : null };
+    if (!it) return { captcha, err: /not available in your country|isn.t available in your/i.test(txt)
+                      ? 'diblokir di wilayah IP .60 (Singapura)' : 'no itemStruct', statusCode: d ? d.statusCode : null };
     const st = it.statsV2 || it.stats || {};
     const extra = it.textExtra || [];
     return {
@@ -148,14 +149,46 @@ class Browser:
                              {"profile": PROFILE, "action": "navigate", "url": url})
         except urllib.error.HTTPError as e:
             return {"ok": False, "error": f"navigate HTTP {e.code}"}
-        try:
-            self._call("POST", "/browser/request",
-                       {"profile": PROFILE, "action": "act",
-                        "request": {"kind": "wait", "fn": ready_fn, "timeoutMs": 25000}}, timeout=40)
-        except Exception as e:
-            return {"ok": False, "error": f"halaman tak siap: {e}"}
+        # TikTok kadang redirect/navigasi internal saat memuat → Playwright melempar
+        # ("execution context destroyed") dan API membalas 500 walau halaman lalu
+        # termuat normal (diuji 25/9). Jadi `wait` diulang, bukan langsung gagal.
+        err = None
+        for _ in range(3):
+            try:
+                self._call("POST", "/browser/request",
+                           {"profile": PROFILE, "action": "act",
+                            "request": {"kind": "wait", "fn": ready_fn, "timeoutMs": 15000}}, timeout=30)
+                err = None
+                break
+            except urllib.error.HTTPError as e:
+                err = f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:160]}"
+            except Exception as e:
+                err = str(e)
+            time.sleep(3)
+        if err:
+            return {"ok": False, "error": f"halaman tak siap: {err}"}
         time.sleep(2)  # beri waktu hidrasi state
         return res
+
+    def quiet(self):
+        """Hentikan & kosongkan <video> di halaman: data yg diambil cuma JSON di HTML,
+        sedangkan video autoplay memakan CPU .60 (2 vCPU). (Diuji 25/9: blokir resource
+        via API tak bisa — requestSchema HTTP membuang field `types`.)"""
+        try:
+            self.evaluate("() => { document.querySelectorAll('video,audio').forEach(v => "
+                          "{ try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} }); return 1; }")
+        except Exception:
+            pass
+
+    def park(self):
+        """Akhir run: tab ke about:blank. Semua profil remote-cdp BERBAGI halaman yg
+        sama, dan tab TikTok yg ditinggal memutar video pernah membuat API .60 150%
+        CPU + halaman timeout sampai container di-restart (25/9)."""
+        try:
+            self._call("POST", "/browser/request",
+                       {"profile": PROFILE, "action": "navigate", "url": "about:blank"}, timeout=30)
+        except Exception as e:
+            log(f"peringatan: gagal parkir tab ke about:blank ({e})")
 
     def evaluate(self, fn):
         res = self._call("POST", "/browser/request",
@@ -273,11 +306,16 @@ def collect_account(br, handle, cfg, run_id, dry):
     for v0 in latest:
         pause(cfg)
         url = f"https://www.tiktok.com/@{handle}/video/{v0['id']}"
-        nav = br.navigate(url, ready_video(v0["id"]))
-        if not nav.get("ok"):
-            log(f"  video {v0['id']}: {nav.get('error')}")
+        try:
+            nav = br.navigate(url, ready_video(v0["id"]))
+            if not nav.get("ok"):
+                log(f"  video {v0['id']}: {nav.get('error')}")
+                continue
+            v = br.evaluate(JS_VIDEO)
+            br.quiet()
+        except Exception as e:  # satu video lambat/timeout tak boleh menggagalkan akun
+            log(f"  video {v0['id']}: ERROR {e}")
             continue
-        v = br.evaluate(JS_VIDEO)
         if v.get("captcha") and not v.get("id"):
             raise Captcha(f"{handle} video")
         if not v.get("id"):
@@ -347,6 +385,7 @@ def main():
                       f"{' · PRIVAT' if u.get('isPrivate') else ''}")
                 if u.get("bio"):
                     print("   bio:", u["bio"].replace("\n", " / ")[:160])
+        br.park()
         return 0
 
     cfg = json.load(open(WATCHLIST))
@@ -368,6 +407,14 @@ def main():
     run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     log(f"run {run_id}: {len(handles)} akun, profil browser {PROFILE}{' (DRY-RUN)' if args.dry_run else ''}")
     results, videos = {}, 0
+    try:
+        return collect_all(br, handles, cfg, run_id, args, results)
+    finally:
+        br.park()
+
+
+def collect_all(br, handles, cfg, run_id, args, results):
+    videos = 0
     try:
         for i, h in enumerate(handles):
             if i:

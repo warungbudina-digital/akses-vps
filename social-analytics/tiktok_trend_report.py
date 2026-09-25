@@ -27,6 +27,8 @@ QUERY = """
 SELECT json_build_object(
  'videos', (SELECT coalesce(json_agg(x), '[]') FROM (
    SELECT v.handle, v.video_id, v.url, v.description, v.hashtags, v.duration_s,
+          (SELECT followers FROM trend.tiktok_account_snapshot a WHERE a.handle = v.handle
+             AND a.status = 'ok' ORDER BY taken_at DESC LIMIT 1) AS followers,
           coalesce(v.media_type, 'video') AS media_type, v.n_images,
           v.created_at, l.plays, l.likes, l.comments, l.shares, l.saves, l.taken_at,
           f.plays AS first_plays, f.taken_at AS first_taken
@@ -161,6 +163,7 @@ def build(d, days):
     out.append(table(sorted(fresh, key=lambda v: -v["velocity"])[:10], [
         ("Akun", lambda v: "@" + v["handle"]), ("Hook / caption", lambda v: v["hook"].replace("|", "/")),
         ("Views", lambda v: fmt(v["plays"])), ("Views/jam", lambda v: fmt(v["velocity"])),
+        ("Views/pengikut", lambda v: f"{v['plays'] / v['followers']:.2f}×" if v.get("followers") and v.get("plays") is not None else "–"),
         ("ER", lambda v: pct(v["er"])), ("Format", fmt_media),
         ("Link", lambda v: f"[buka]({v['url']})")]))
 
