@@ -121,3 +121,42 @@ Lihat memori Claude: `feedback_social_login_use_laptop_browser.md` (SOP
 login medsos WAJIB lewat browser laptop SUARAHATI, bukan tempat lain) dan
 `project_medsos_agent.md` bagian 2026-08-25 (kronologi lengkap perancangan
 + semua bug yang ditemukan/difix selama membangun skrip ini).
+
+## Riset tren TikTok (`tiktok_trend.py`) — ditambahkan 2026-09-25
+
+Pantau watchlist kreator niche AI/tech → statistik video ke DB-VPS schema
+`trend` → laporan Markdown mingguan (+ ringkasan Telegram). Tujuannya bahan ide
+konten Go Go Bud: hook, format (video vs carousel), durasi, hashtag, jam posting
+yang sedang bekerja di niche ini.
+
+| File | Fungsi |
+|---|---|
+| `tiktok_watchlist.json` | daftar akun dipantau + setelan volume/jeda |
+| `tiktok_trend.py` | pengumpul (browser API Cloud Shell .60 → DB-VPS) |
+| `tiktok_trend_report.py` | laporan → `reports/tiktok-trend-<tgl>.md` (`--telegram` = ringkasan) |
+| `tiktok-trend-cron.sh` | entrypoint cron: maks 1 run sukses/hari, laporan Telegram tiap Senin |
+| `tiktok_trend_schema.sql` | skema `trend.*` (idempoten) |
+
+```bash
+python3 tiktok_trend.py --check @handle1 @handle2   # cek akun sebelum masuk watchlist
+python3 tiktok_trend.py --dry-run --only tommythings # uji tanpa tulis DB
+python3 tiktok_trend_report.py --days 30             # buat laporan sekarang
+tail -f ~/tiktok-trend.log                           # log cron
+```
+
+**Jalur data (diuji dari IP Cloud Shell, pengunjung anonim):** `/tag/` & `/discover/`
+ditolak; halaman profil memicu CAPTCHA saat memuat daftar video; **widget embed
+`/embed/@handle`** memberi info user + ±13 video tanpa CAPTCHA → dipakai; halaman
+video memberi statistik lengkap (SSR). Waktu unggah juga bisa dari ID (`id >> 32`).
+
+**Jebakan yg sudah ditangani:**
+- **MTU hub→.60**: wg0 hub 1420 vs .60 1380 → body HTTP >~1.3KB ke .60 menggantung
+  selamanya. Butuh rute `10.66.66.60/32 mtu 1380` di hub (permanen via
+  `~/akses-vps/wireguard/persist-mtu-cloudshell60.sh`). Collector memeriksa ini di
+  awal dan GAGAL dgn pesan jelas kalau rutenya hilang.
+- **Baca halaman sebelumnya**: jeda tetap setelah navigate pernah membaca halaman
+  lama → sekarang tunggu sampai URL cocok target + cek handle/ID hasil = target.
+- **Carousel foto** (Photo Mode) durasinya 0 → dicatat `media_type=photo`, durasi NULL.
+- Akun tak ada: embed `isError:true`. CAPTCHA → run berhenti (exit 2), bukan dipaksa.
+- Status per akun membedakan `ok`/`no_videos` (terukur) dari `captcha`/`error`/`not_found`
+  (gagal mengukur) — laporan menampilkan kesehatan pengumpulan di bagian atas.

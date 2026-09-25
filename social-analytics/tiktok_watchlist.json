@@ -1,0 +1,11 @@
+{
+  "_catatan": "Akun kreator niche AI/tech yg dipantau tiktok_trend.py. Tambah/hapus handle di 'accounts'. Kandidat baru otomatis terkumpul di tabel trend.tiktok_candidate (dari 'Suggested accounts') — pindahkan ke sini kalau cocok.",
+  "accounts": [
+    "sazporto",
+    "tommythings"
+  ],
+  "max_accounts_per_run": 8,
+  "videos_per_account": 4,
+  "delay_min_s": 25,
+  "delay_max_s": 45
+}
