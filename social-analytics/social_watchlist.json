@@ -1,0 +1,8 @@
+{
+  "_catatan": "Riset lintas platform niche AI/tech/skill digital Indonesia (dipilih 2026-09-25 dari kandidat terverifikasi, urut pengikut, aktif, bukan media berita). Ubah bebas; cek dulu dgn `social_trend.py --check <platform> <handle>`.",
+  "instagram": ["myskill.id", "tommyteja", "aico.community", "buildwithangga", "sazporto"],
+  "youtube": ["GadgetIn", "JagatReview", "DeaAfrizal", "KelasTerbuka", "sazporto"],
+  "facebook": [],
+  "posts_per_account": 12,
+  "youtube_shorts_check_max": 12
+}

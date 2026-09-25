@@ -66,3 +66,48 @@ CREATE TABLE IF NOT EXISTS trend.tiktok_candidate (
 -- 2026-09-25: bedakan video vs carousel foto (Photo Mode; durasi 0 menyesatkan).
 ALTER TABLE trend.tiktok_video ADD COLUMN IF NOT EXISTS media_type text;  -- video | photo
 ALTER TABLE trend.tiktok_video ADD COLUMN IF NOT EXISTS n_images   int;
+
+-- 2026-09-25: riset lintas platform (instagram / youtube / facebook) — tabel generik.
+CREATE TABLE IF NOT EXISTS trend.social_account_snapshot (
+  id          bigserial PRIMARY KEY,
+  run_id      text        NOT NULL,
+  platform    text        NOT NULL,
+  handle      text        NOT NULL,
+  taken_at    timestamptz NOT NULL DEFAULT now(),
+  status      text        NOT NULL,  -- ok | not_found | error
+  name        text,
+  followers   bigint,
+  posts       bigint,
+  total_views bigint,
+  error       text
+);
+CREATE INDEX IF NOT EXISTS social_account_snapshot_idx
+  ON trend.social_account_snapshot (platform, handle, taken_at DESC);
+
+CREATE TABLE IF NOT EXISTS trend.social_post (
+  platform     text        NOT NULL,
+  post_id      text        NOT NULL,
+  handle       text        NOT NULL,
+  url          text,
+  caption      text,
+  media_type   text,        -- video | short | reel | image | carousel
+  hashtags     text[]      NOT NULL DEFAULT '{}',
+  created_at   timestamptz,
+  first_seen   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, post_id)
+);
+CREATE INDEX IF NOT EXISTS social_post_handle_idx ON trend.social_post (platform, handle, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS trend.social_post_snapshot (
+  id        bigserial PRIMARY KEY,
+  run_id    text        NOT NULL,
+  platform  text        NOT NULL,
+  post_id   text        NOT NULL,
+  taken_at  timestamptz NOT NULL DEFAULT now(),
+  views     bigint,     -- IG Business Discovery tak memberi views → NULL
+  likes     bigint,
+  comments  bigint,
+  FOREIGN KEY (platform, post_id) REFERENCES trend.social_post (platform, post_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS social_post_snapshot_idx
+  ON trend.social_post_snapshot (platform, post_id, taken_at DESC);

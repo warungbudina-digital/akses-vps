@@ -160,3 +160,31 @@ video memberi statistik lengkap (SSR). Waktu unggah juga bisa dari ID (`id >> 32
 - Akun tak ada: embed `isError:true`. CAPTCHA → run berhenti (exit 2), bukan dipaksa.
 - Status per akun membedakan `ok`/`no_videos` (terukur) dari `captcha`/`error`/`not_found`
   (gagal mengukur) — laporan menampilkan kesehatan pengumpulan di bagian atas.
+
+### Instagram + YouTube (`social_trend.py`) — ditambahkan 2026-09-25
+5 akun teratas per platform di `social_watchlist.json` (niche AI/tech/skill digital
+Indonesia, aktif, urut pengikut, tanpa media berita). Jalan penuh dari hub — TIDAK
+butuh .60/laptop:
+- **Instagram:** Graph API *Business Discovery* dgn token Page gogobud
+  (`~/.config/meta-gogobud/app.env`). Resmi. Hanya akun Business/Creator (pribadi →
+  "Invalid user id"). Reels ada `view_count`; carousel tanpa views; like bisa
+  tersembunyi (NULL) kalau kreator menyembunyikan like.
+- **YouTube:** `/@handle/about` (en-US: subscriber/views/jumlah video) + RSS
+  `feeds/videos.xml` (15 video terbaru, views, likes). Shorts = `/shorts/<id>` 200
+  (video biasa 303). ID channel WAJIB dari `<link rel=canonical>` — kemunculan
+  `"channelId"` pertama di HTML bisa milik channel lain.
+- **Facebook: belum.** Graph API utk Page orang lain butuh App Review (Page Public
+  Content Access); .60 kena login-wall; laptop hanya punya tab Cloud Shell (profil
+  Budayana yg login FB tak terbuka).
+
+Tabel: `trend.social_account_snapshot`, `trend.social_post`, `trend.social_post_snapshot`.
+Laporan memakai metrik ÷ pengikut (views/pengikut, (like+komentar)/pengikut) supaya
+akun raksasa tak otomatis menang, plus uji ajakan "komen …" di caption.
+`tiktok-trend-cron.sh` menjalankan IG/YT dulu (penanda harian sendiri), lalu TikTok;
+laporan Senin tetap terkirim di slot terakhir walau TikTok gagal.
+
+```bash
+python3 social_trend.py --check instagram akun1 akun2   # seleksi akun
+python3 social_trend.py --check youtube HandleChannel
+python3 social_trend.py --dry-run --only youtube
+```
