@@ -33,8 +33,13 @@ hub cron → run.sh → rsync kode → ssh .61 `run_worker.py` → JSONL
 ## Status (27/9)
 - Langkah-0 **TERBUKTI** dari IP hub: embed + video-detail keduanya HTTP 200 + JSON asli
   (@sazporto 86,6rb follower; video play 43.700/save 324 → save-rate 0,74%).
-- ⚠️ **Belum diuji dari IP CS .61 (Singapura)** — anti-bot TikTok bisa beda per-IP; re-konfirmasi saat deploy.
-- ⚠️ **Throttle nyata**: request beruntun tanpa jeda → HTTP 503. `delay_min_s/max_s` di watchlist WAJIB dipatuhi (backoff sudah ada di `_get`).
+- ✅ **DEPLOYED ke .61 + tervalidasi dari IP CS**: file di `~/scraper-worker` (`gogobuda65@10.66.66.61`,
+  key `~/.ssh/akses-vps-cloudshell-admin`). Embed **jalan** dari IP CS; video-detail **jalan** dari IP CS
+  (parse penuh: save 324, save-rate 0,741%).
+- ⭐ **UA DESKTOP WAJIB**: embed jalan UA apa pun, tapi **video-detail hanya kembalikan itemStruct utk UA
+  desktop** — UA mobile dapat shell tanpa data (status `no_data`). Sudah difix di `tiktok_scraper.py`.
+- ⚠️ **Throttle nyata**: request beruntun tanpa jeda → HTTP 503 (status `captcha`). `delay_min_s/max_s`
+  (25–45s) di watchlist WAJIB dipatuhi (backoff sudah ada di `_get`). Jangan pakai jeda kecil saat uji.
 
 ## TODO deploy
 1. Alias ssh `.61` di hub (`WORKER_SSH`, ControlMaster spt `c50`/`c60`).

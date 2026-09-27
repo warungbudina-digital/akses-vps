@@ -26,8 +26,11 @@ from dataclasses import dataclass, field
 
 import requests
 
-UA = ("Mozilla/5.0 (Linux; Android 14; Redmi Note 7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36")
+# UA DESKTOP wajib: embed jalan dgn UA apa pun, TAPI video-detail hanya
+# mengembalikan SSR penuh (itemStruct) utk UA desktop — UA mobile dapat shell
+# tanpa data (status "no_data"). Terbukti dari IP CS .61 (27/9).
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 HEADERS = {"User-Agent": UA, "Accept-Language": "id-ID,id;q=0.9,en;q=0.8"}
 EMBED_URL = "https://www.tiktok.com/embed/@{h}"
 VIDEO_URL = "https://www.tiktok.com/@{h}/video/{vid}"
