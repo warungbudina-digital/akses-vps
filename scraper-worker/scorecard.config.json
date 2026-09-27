@@ -1,0 +1,12 @@
+{
+  "_catatan": "Bobot & ambang Viral Scorecard. Bobot grup default 0.30/0.30/0.20/0.20 (bisa disetel). Ambang = titik kalibrasi pemetaan metrik objektif -> skala 1..5 (linear di-clamp).",
+  "weights": { "g1": 0.30, "g2": 0.30, "g3": 0.20, "g4": 0.20 },
+  "zones": { "green": 4.2, "yellow": 3.0 },
+  "top_k": 10,
+  "thresholds": {
+    "save_rate_pct":   { "lo": 0.1, "hi": 3.0, "_": "-> Nilai Berbagi (G2). save-rate median niche ~0.1%, kuat ~3%+" },
+    "share_rate_pct":  { "lo": 0.1, "hi": 2.0 },
+    "trend_ratio":     { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). plays video / median plays akun. >1 = di atas baseline" },
+    "duration_fast_s": { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). makin pendek/simpel makin cepat dibuat" }
+  }
+}
