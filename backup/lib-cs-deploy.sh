@@ -178,126 +178,40 @@ _deploy_balibruntattour_impl() {
 # ---------------------------------------------------------------------
 deploy_gogobuda() { _locked_deploy gogobuda _deploy_gogobuda_impl; }
 _deploy_gogobuda_impl() {
+  # .61 (gogobuda) KINI = worker SCRAPER riset tren TikTok (requests-only), BUKAN
+  # n8n (n8n medsos pindah ke CHROME-VPS, 27/9). Deploy RINGAN: scp kode
+  # scraper-worker + watchlist, pastikan `requests`, verifikasi modul importable.
+  # Idempoten (dipanggil cron */5 begitu laptop boot & .61 naik); file kecil, nol build.
   local host="gogobuda65@10.66.66.61"
-  local cred="$HOME/.config/n8n-uploader/credentials.env"
-  local oauth="$HOME/.config/n8n-uploader/oauth-client.env"
-  local token_src="$HOME/.config/n8n-uploader/token.json"
-  # gfootage (2026-08-24, fix gap): akun Gdrive TEMPAT hasil export Reel RN7
-  # benar2 mendarat, beda dari akun gdrive (gogobuda65 sendiri) yg dipasang
-  # RCLONE_CLIENT_ID/SECRET di atas. Sumbernya rclone.conf HUB SENDIRI (sudah
-  # punya remote [gfootage] sehat, dipakai skrip lain di hub) - ekstrak
-  # stanza-nya (header sampai section berikutnya/EOF), base64, kirim ke
-  # deploy.sh via env (lihat configure_rclone() di mcp-video-editor). OPSIONAL:
-  # kalau file/section tak ada, deploy tetap lanjut, cuma remote [gfootage]
-  # yg absen di gogobuda (bukan blocker deploy keseluruhan).
-  local gfootage_conf="$HOME/.config/rclone/rclone.conf"
-  local gfootage_b64=""
-  if [ -f "$gfootage_conf" ]; then
-    gfootage_b64="$(awk '/^\[gfootage\]/{p=1} /^\[/ && !/^\[gfootage\]/{p=0} p' "$gfootage_conf" | base64 -w0 2>/dev/null || true)"
-  fi
-  if [ -z "$gfootage_b64" ]; then
-    echo ".61 (gogobuda) WARN: remote [gfootage] tak ditemukan di $gfootage_conf - deploy lanjut, tapi workflow n8n yg baca VN-exports akan gagal sampai ini diisi."
-  fi
+  local sw="$HOME/akses-vps/scraper-worker"
+  local wl="$HOME/akses-vps/social-analytics/tiktok_watchlist.json"
+  local rdir="scraper-worker"
 
   if ! reachable_cs "$host"; then
     echo ".61 (gogobuda) belum reachable."
     return 1
   fi
 
-  # Fast-path (2026-09-09 fix): kalau n8n SUDAH running+healthz 200, JANGAN
-  # full-redeploy (git pull + docker build + compose up --build) lagi -- ini
-  # akar masalah lama "GUI n8n selalu 'n8n is starting up. Please wait'"
-  # (lihat project_n8n_gogobuda_gui_stuck.md kandidat #2, terkonfirmasi live
-  # 2026-09-09): cron cs-auto-deploy.sh (*/5mnt) memanggil fungsi ini TANPA
-  # fast-path apa pun, dan `deploy_stack()` di scripts/v2/deploy.sh SELALU
-  # `docker compose up -d --build` tanpa syarat -- build ulang tiap tick
-  # menghasilkan image dgn digest BEDA (diverifikasi: manifest sha256 beda
-  # antar-run walau semua layer CACHED), jadi compose recreate+SIGTERM
-  # container n8n tiap 5 menit, sebelum sempat selesai render UI penuh ->
-  # loop abadi "starting up" walau /healthz sendiri 200. Skip total (nol SSH
-  # tambahan) kalau sudah sehat -- konsisten pola deploy_yuni/bring-up-
-  # browser.sh yg SUDAH py fast-path serupa.
-  local n8n_healthy
-  n8n_healthy="$(ssh "${CS_SSHOPTS[@]}" "$host" '
-    st=$(docker inspect -f "{{.State.Status}}" n8n 2>/dev/null || echo none)
-    if [ "$st" = "running" ]; then
-      curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:5678/healthz 2>/dev/null || echo 000
-    else
-      echo none
-    fi
-  ' 2>/dev/null)"
-  if [ "$n8n_healthy" = "200" ]; then
-    echo ".61 n8n-uploader SUDAH jalan sehat (container running, /healthz 200) -> skip redeploy."
+  ssh "${CS_SSHOPTS[@]}" "$host" "mkdir -p $rdir" || { echo ".61 (gogobuda) mkdir gagal."; return 1; }
+  if ! scp "${CS_SSHOPTS[@]}" "$sw/tiktok_scraper.py" "$sw/run_worker.py" "$host:$rdir/" >/dev/null 2>&1; then
+    echo ".61 (gogobuda) scp kode scraper GAGAL."
+    return 1
+  fi
+  if [ -f "$wl" ]; then
+    scp "${CS_SSHOPTS[@]}" "$wl" "$host:$rdir/watchlist.json" >/dev/null 2>&1 \
+      || echo ".61 (gogobuda) WARN: watchlist tak terkirim (deploy lanjut)."
+  fi
+
+  # requests biasanya sudah ada di Cloud Shell; pasang bila tidak.
+  ssh "${CS_SSHOPTS[@]}" "$host" 'python3 -c "import requests" 2>/dev/null || pip install --quiet --user requests' \
+    || { echo ".61 (gogobuda) requests tak bisa dipasang."; return 1; }
+
+  # SEHAT (kontrak: 0 = verified) = modul scraper importable + kelas kunci ada.
+  if ssh "${CS_SSHOPTS[@]}" "$host" "cd $rdir && python3 -c 'import tiktok_scraper as t; assert hasattr(t,\"TikTokScraper\")'" >/dev/null 2>&1; then
+    echo ".61 (gogobuda) scraper-worker SEHAT terverifikasi (kode + requests siap)."
     return 0
   fi
-
-  if [ ! -f "$cred" ] || [ ! -f "$oauth" ]; then
-    echo ".61 (gogobuda) reachable TAPI kredensial belum lengkap ($cred / $oauth) - skip deploy."
-    return 1
-  fi
-
-  echo ".61 (gogobuda) reachable -> bring-up n8n-uploader"
-  # shellcheck disable=SC1090
-  set -a; . "$cred"; . "$oauth"; set +a
-
-  local token_b64=""
-  if [ -f "$token_src" ]; then
-    token_b64="$(base64 -w0 "$token_src" 2>/dev/null || base64 "$token_src" | tr -d '\n')"
-  fi
-
-  # (2026-08-25 fix: kondisi ini SEMPAT terbalik -- `!` bikin cabang "GAGAL"
-  # kepicu justru saat ssh SUKSES exit 0, dan sebaliknya lolos ke healthz-loop
-  # di bawah justru saat GAGAL. Terbukti reproducible: cs-auto-deploy re-run
-  # idempoten [Container n8n Running] TETAP lapor "GAGAL" krn bug ini.)
-  if ssh "${CS_SSHOPTS[@]}" "$host" bash -s <<REMOTE_EOF
-set -euo pipefail
-cd ~
-if [ -d mcp-video-editor/.git ]; then
-  cd mcp-video-editor && git pull --ff-only
-else
-  git clone https://github.com/warungbudina-digital/mcp-video-editor.git
-  cd mcp-video-editor
-fi
-TOKEN_B64='$token_b64'
-if [ -n "\$TOKEN_B64" ]; then
-  echo "\$TOKEN_B64" | base64 -d > token.json
-fi
-export DB_POSTGRESDB_HOST='$DB_POSTGRESDB_HOST'
-export DB_POSTGRESDB_PORT='$DB_POSTGRESDB_PORT'
-export DB_POSTGRESDB_DATABASE='$DB_POSTGRESDB_DATABASE'
-export DB_POSTGRESDB_USER='$DB_POSTGRESDB_USER'
-export DB_POSTGRESDB_PASSWORD='$DB_POSTGRESDB_PASSWORD'
-export RCLONE_CLIENT_ID='$RCLONE_CLIENT_ID'
-export RCLONE_CLIENT_SECRET='$RCLONE_CLIENT_SECRET'
-export GFOOTAGE_RCLONE_STANZA_B64='$gfootage_b64'
-export N8N_ENCRYPTION_KEY='$N8N_ENCRYPTION_KEY'
-export N8N_BASIC_AUTH_USER='$N8N_BASIC_AUTH_USER'
-export N8N_BASIC_AUTH_PASSWORD='$N8N_BASIC_AUTH_PASSWORD'
-bash n8n-script.sh
-REMOTE_EOF
-  then
-    echo ".61 n8n-uploader bring-up perintah SELESAI, TAPI belum diverifikasi sehat -> cek healthz."
-  else
-    echo ".61 n8n-uploader bring-up GAGAL (SSH/script exit != 0)."
-    return 1
-  fi
-
-  # n8n-script.sh sendiri TIDAK memverifikasi health (beda dari bring-up-analyzer.sh
-  # / bring-up-browser.sh) -> verifikasi eksplisit di sini, poll container Up +
-  # /healthz, MAKS 90s (n8n cuma start image yg sudah di-pull, bukan build lama).
-  local i st health
-  for i in $(seq 1 18); do
-    st="$(ssh "${CS_SSHOPTS[@]}" "$host" "docker inspect -f '{{.State.Status}}' n8n 2>/dev/null || echo none")"
-    if [ "$st" = "running" ]; then
-      health="$(ssh "${CS_SSHOPTS[@]}" "$host" "curl -sf -o /dev/null -w '%{http_code}' http://127.0.0.1:5678/healthz 2>/dev/null || echo 000")"
-      if [ "$health" = "200" ]; then
-        echo ".61 n8n-uploader SEHAT terverifikasi (container running, /healthz 200)."
-        return 0
-      fi
-    fi
-    sleep 5
-  done
-  echo ".61 n8n-uploader TAK sehat setelah 90s menunggu (container status=$st, healthz=${health:-belum-dicek}) -> cek: ssh gogobuda65@10.66.66.61 'docker logs n8n'."
+  echo ".61 (gogobuda) scraper-worker verifikasi import GAGAL."
   return 1
 }
 

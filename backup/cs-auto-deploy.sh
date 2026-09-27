@@ -38,15 +38,13 @@ run_and_log() { "$1" 2>&1 | sed 's/^/[cs-auto-deploy] /' | tee -a "$LOG" >/dev/n
 
 run_and_log deploy_yuni
 run_and_log deploy_balibruntattour
-# ⏸️ 2026-09-09: deploy_gogobuda (n8n di Cloud Shell .61) dinonaktifkan dari
-# pipeline -- n8n gogobuda SUDAH DIPINDAH permanen ke CHROME-VPS (idcloudhost
-# 10.122.31.254, persisten 24/7). Kalau ini tetap dipanggil & .61 kebetulan
-# reachable, akan bikin instance n8n KEDUA nyala pointing ke DB Postgres yang
-# SAMA (n8n_uploader di DB-VPS) -> konflik (dua proses nulis state/eksekusi
-# bersamaan). Fungsi deploy_gogobuda di lib-cs-deploy.sh dibiarkan utuh utk
-# referensi/rollback, cuma tak dipanggil lagi di sini. Lihat
-# project_n8n_gogobuda_gui_stuck.md / project_chrome_vps_cookie_station.md.
-# run_and_log deploy_gogobuda
+# 2026-09-27: deploy_gogobuda DIALIH-FUNGSIKAN + DIAKTIFKAN LAGI. .61 bukan lagi
+# n8n (n8n medsos permanen di CHROME-VPS) -> deploy_gogobuda kini men-deploy
+# WORKER SCRAPER riset tren (scraper-worker, requests-only) tiap laptop boot &
+# .61 naik. Ringan (scp kode + verifikasi import python/requests, NOL build),
+# jadi konflik "instance n8n kedua" yg lama TIDAK berlaku lagi. Rollback: lihat
+# git history lib-cs-deploy.sh (_deploy_gogobuda_impl versi n8n).
+run_and_log deploy_gogobuda
 # ⏸️ 2026-08-31 (permintaan user): ogis dinonaktifkan dari pipeline (bukan
 # dihapus). Lihat catatan lengkap di wake-orchestrator.sh. Aktifkan lagi:
 # hapus tanda komentar baris di bawah.
