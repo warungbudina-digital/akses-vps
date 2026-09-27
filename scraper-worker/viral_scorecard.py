@@ -70,7 +70,14 @@ def db_json(select_sql: str):
                        text=True, capture_output=True)
     if p.returncode != 0:
         raise RuntimeError("psql read gagal: " + p.stderr.strip()[-300:])
-    return json.loads(p.stdout.strip() or "[]")
+    # ssh db-vps mengawali stdout dgn banner MOTD (login IDCloudHost) & bisa ada sisa
+    # di belakang → cari '[' pertama (json_agg = array; banner tak mengandung '[')
+    # lalu raw_decode (berhenti di akhir JSON valid, abaikan sisa).
+    i = p.stdout.find("[")
+    if i < 0:
+        return []
+    obj, _ = json.JSONDecoder().raw_decode(p.stdout[i:])
+    return obj
 
 
 def db_write(sql: str):
@@ -161,14 +168,66 @@ def clamp15(v):
         return None
 
 
-# ---------- Tier-2: analyzer .50 (STUB) ----------
+# ---------- Tier-2: analyzer .50 (WIRED via pipeline enqueue + media.video_analysis) ----------
+ENQUEUE = os.environ.get("ENQUEUE_PY", str(HERE / "../viral-pipeline/enqueue.py"))
+ENQUEUE_ENABLED = True  # di-set main() (mati saat --dry-run/--no-enqueue)
+
+HOOK_MAP = {"strong_hook": 5.0, "medium_hook": 3.5, "weak_hook": 2.0, "no_hook": 1.0, "none": 1.0}
+EMO_NEUTRAL = {"neutral face", "unknown", "no face", ""}
+
+
+def _fetch_ir(video_id: str):
+    """Ambil IR (analysis jsonb) analyzer .50 utk video TikTok ini, atau None."""
+    rows = db_json(
+        "SELECT va.analysis FROM media.video_analysis va "
+        "JOIN media.video_ingest vi ON vi.id = va.ingest_id "
+        f"WHERE vi.platform = 'tiktok' AND vi.external_id = {q(video_id)} "
+        "ORDER BY va.id DESC LIMIT 1")
+    return rows[0]["analysis"] if rows else None
+
+
+def map_ir_to_dims(a: dict) -> dict:
+    """Petakan IR ViralAnalysis (.50) → 4 sub-skor 1..5. Ambang = titik kalibrasi (tunable)."""
+    scenes = a.get("scene_analysis") or []
+    dur = a.get("duration_sec") or 0
+    # Hook = hook_strength SCENE PERTAMA (pembuka = 3 detik)
+    s_hook = HOOK_MAP.get((scenes[0].get("hook_strength") or "").lower()) if scenes else None
+    # Pacing = kepadatan cut (scene/detik) + motion rata-rata
+    s_pacing = None
+    if scenes and dur:
+        p_cut = scale(len(scenes) / dur, 0.05, 0.5)          # 1 scene/20s .. 1 scene/2s
+        p_mot = scale(sum(s.get("motion", 0) or 0 for s in scenes) / len(scenes), 0.5, 8.0)
+        vals = [v for v in (p_cut, p_mot) if v is not None]
+        s_pacing = round(sum(vals) / len(vals), 2) if vals else None
+    # Re-watchability = makin pendek makin loopable (invert durasi)
+    s_rewatch = scale(-dur, -60, -8) if dur else None        # <=8s=5 .. >=60s=1
+    # Emosi = fraksi scene ber-emosi non-netral + tempo (bpm)
+    s_emosi = None
+    if scenes:
+        frac = sum(1 for s in scenes if (s.get("emotion") or "").lower() not in EMO_NEUTRAL) / len(scenes)
+        e_emo = scale(frac, 0.1, 0.8)
+        e_bpm = scale(a.get("bpm"), 80, 160) if a.get("bpm") else None
+        vals = [v for v in (e_emo, e_bpm) if v is not None]
+        s_emosi = round(sum(vals) / len(vals), 2) if vals else None
+    return {"s_hook": s_hook, "s_pacing": s_pacing, "s_rewatch": s_rewatch, "s_emosi": s_emosi}
+
+
 def analyzer_ir(video_id: str, handle: str):
-    """TODO: ambil IR dari analyzer .50 utk video ini.
-    Analyzer memproses FILE video → perlu: (1) unduh video top-K (yt-dlp/HTTP),
-    (2) kirim ke pipeline .50 (pola analyzer-pipeline-trigger.sh, hub-gateway DB-VPS),
-    (3) baca IR (media.* / hasil) → petakan ke Hook/Pacing/Rewatch/Emosi 1..5.
-    Sampai itu wired → kembalikan None (dimensi pending)."""
-    return None  # {"s_hook":..,"s_pacing":..,"s_rewatch":..,"s_emosi":..}
+    """IR analyzer .50 → 4 dim. ASINKRON: kalau IR sudah ada di media.video_analysis
+    → petakan+kembalikan; kalau belum → enqueue URL TikTok (analyzer proses saat drain
+    .50 berikutnya, pola analyzer-pipeline-trigger.sh) → kembalikan None (pending).
+    Run scorecard BERIKUTNYA (stlh drain) yang mengisi 4 dim ini."""
+    ir = _fetch_ir(video_id)
+    if ir:
+        return map_ir_to_dims(ir)
+    if ENQUEUE_ENABLED:
+        url = f"https://www.tiktok.com/@{handle}/video/{video_id}"
+        try:
+            subprocess.run(["python3", ENQUEUE, "viral_video", url],
+                           capture_output=True, text=True, timeout=30)  # idempoten (ON CONFLICT)
+        except Exception:
+            pass
+    return None
 
 
 # ---------- heuristik Feasibility ----------
@@ -270,8 +329,11 @@ def main() -> int:
     ap.add_argument("--run-id", default=None, help="batasi ke run scrape tertentu (default: semua video terbaru)")
     ap.add_argument("--top-k", type=int, default=None)
     ap.add_argument("--no-llm", action="store_true", help="lewati Gemini")
-    ap.add_argument("--dry-run", action="store_true", help="cetak saja, jangan tulis DB")
+    ap.add_argument("--no-enqueue", action="store_true", help="jangan enqueue video ke analyzer .50")
+    ap.add_argument("--dry-run", action="store_true", help="cetak saja, jangan tulis DB / enqueue")
     args = ap.parse_args()
+    global ENQUEUE_ENABLED
+    ENQUEUE_ENABLED = not (args.dry_run or args.no_enqueue)
     cfg = load_config()
     top_k = args.top_k or cfg["top_k"]
     score_run = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + uuid.uuid4().hex[:6]
