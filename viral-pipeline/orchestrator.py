@@ -146,8 +146,14 @@ def download(job):
     if not cookie:
         return None, f"platform tak didukung: {job['platform']}"
     jid, url = job["id"], job["url"]
+    # Prefer H.264 (avc1) <=720p + audio m4a -> merge -c copy ke mp4. Hindari av1/vp9
+    # DI HULU: analyzer .50 gagal-senyap mendekode FRAME av1 (scene_analysis=1 +
+    # semantic "unknown", ASR tetap jalan -> terlihat sukses). Dicegah di sini jauh
+    # lebih murah daripada transcode av1->h264 di hilir. -S fallback aman bila tak ada h264.
+    fmt = ('-f "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b" '
+           '-S "vcodec:h264,ext:mp4:m4a" --merge-output-format mp4')
     cmd = (f"cd {DBVPS_TOOLS} && mkdir -p work && rm -f work/job-{jid}.* && "
-           f'PATH="$PWD:$PATH" ./yt-dlp --cookies {cookie} --no-playlist '
+           f'PATH="$PWD:$PATH" ./yt-dlp --cookies {cookie} --no-playlist {fmt} '
            f"-o 'work/job-{jid}.%(ext)s' {shlex.quote(url)} >work/job-{jid}.log 2>&1 && "
            f"ls work/job-{jid}.* | grep -v '\\.log$' | head -1")
     r = ssh_db(cmd, timeout=600)
