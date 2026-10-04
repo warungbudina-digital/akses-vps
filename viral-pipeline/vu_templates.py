@@ -33,12 +33,16 @@ COLOR = {
 }
 
 # ---------- reframe core (input 1920x1080 dari scale render.py; TANPA setsar) ----------
+# Blur latar = trik downscale→upscale (bilinear), BUKAN gblur: gblur sigma besar
+# sangat lambat di ARM lemah (SD660 ~menit/klip). Scale-trick nyaris gratis + mirip.
 _BLUR916 = ("split=2[bg][fg];[bg]scale=1080:1920:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,gblur=sigma=20[b];[fg]scale=1080:-2[f];[b][f]overlay=(W-w)/2:(H-h)/2")
+            "crop=1080:1920,scale=-2:240,scale=1080:1920[b];[fg]scale=1080:-2[f];"
+            "[b][f]overlay=(W-w)/2:(H-h)/2")
 _ZOOM916 = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
 _TOPCAP  = "scale=1080:-2,pad=1080:1920:(ow-iw)/2:200:color=0x0E1116"
 _FEED45  = ("split=2[bg][fg];[bg]scale=1080:1350:force_original_aspect_ratio=increase,"
-            "crop=1080:1350,gblur=sigma=18[b];[fg]scale=1080:-2[f];[b][f]overlay=(W-w)/2:(H-h)/2")
+            "crop=1080:1350,scale=-2:170,scale=1080:1350[b];[fg]scale=1080:-2[f];"
+            "[b][f]overlay=(W-w)/2:(H-h)/2")
 _SQ11    = "scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080"
 _LAND169 = ""  # pertahankan 1920x1080
 
