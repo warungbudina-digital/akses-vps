@@ -200,7 +200,11 @@ def map_ir_to_dims(a: dict) -> dict:
         vals = [v for v in (p_cut, p_mot) if v is not None]
         s_pacing = round(sum(vals) / len(vals), 2) if vals else None
     # Re-watchability = makin pendek makin loopable (invert durasi)
-    s_rewatch = scale(-dur, -60, -8) if dur else None        # <=8s=5 .. >=60s=1
+    # Window diperlebar: konten PESAN butuh ruang (setup->klaim->payoff). Window
+    # lama (-60,-8) menghukum durasi tajam (>=8s mulai turun) -> memaksa potong
+    # terlalu pendek & payoff hilang. Sekarang <=30s dipertahankan 5.0, turun
+    # landai ke 90s. Lihat cut-doctrine.md.
+    s_rewatch = scale(-dur, -90, -30) if dur else None       # <=30s=5 .. 45s=4 .. 60s=3 .. >=90s=1
     # Emosi = fraksi scene ber-emosi non-netral + tempo (bpm)
     s_emosi = None
     if scenes:
