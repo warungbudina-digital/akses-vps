@@ -27,6 +27,7 @@ C60_HOST="${C60_HOST:-balibruntattour@10.66.66.60}"
 C60_KEY="${C60_KEY:-$HOME/.ssh/akses-vps-cloudshell-admin}"
 API="${BROWSER_API:-http://10.66.66.60:8080}"
 CRED="${BROWSER_API_CRED:-$HOME/.config/browser-api/credentials.env}"
+DI_CRED="${DI_CRED:-$HOME/.config/dataimpulse/proxy.env}"   # durable di hub; isi DI_PROXY=...
 REPO_URL="https://github.com/warungbudina-digital/browser.git"
 BUILD_WAIT="${BUILD_WAIT:-360}"    # detik; build Chromium cold ~3-4mnt
 
@@ -53,6 +54,16 @@ if [ -z "$KEY" ]; then
   log "GAGAL: BROWSER_API_KEY kosong — set env atau isi ${CRED}."
   exit 1
 fi
+
+# ── Proxy residensial opsional (DataImpulse via service di-relay) ───────────
+# DI_CRED durable di hub (24/7); value WAJIB single-quote krn targeting ber-';'.
+# Kosong = tanpa proxy (perilaku lama). Terisi = inject DI_PROXY+BROWSER_PROXY
+# ke .env .60 + compose dijalankan dgn --profile proxy (lihat [[feedback_browser_analysis_no_laptop]]).
+DI_PROXY=""
+if [ -f "$DI_CRED" ]; then set -a; . "$DI_CRED"; set +a; fi
+PROFILE_ARG=""; [ -n "${DI_PROXY:-}" ] && PROFILE_ARG="--profile proxy"
+[ -n "${DI_PROXY:-}" ] && log "Proxy residensial AKTIF (di-relay, egress via DataImpulse)." \
+                       || log "Proxy residensial tidak dikonfigurasi (DI_CRED kosong) — egress langsung."
 
 # ── 0. Fast path: sudah live? ───────────────────────────────────────────────
 if [ "$(hs /health)" = "200" ]; then
@@ -84,7 +95,7 @@ ssh-keygen -f "$HOME/.ssh/known_hosts" -R 10.66.66.60 >/dev/null 2>&1 || true
 # ── 2. Provisioning DI .60: clone + .env (sync kunci) + launch build detached
 # Kunci diinject via env remote. Heredoc 'REMOTE' = tanpa ekspansi lokal.
 log "Provisioning .60 (clone bila perlu, sinkronkan .env, jalankan build)..."
-ssh60 "BROWSER_API_KEY='$KEY' bash -s" <<'REMOTE'
+ssh60 "BROWSER_API_KEY='$KEY' DI_PROXY='$DI_PROXY' bash -s" <<'REMOTE'
 set -e
 REPO_DIR="$HOME/browser"
 
@@ -104,6 +115,16 @@ if [ ! -f .env ]; then
 fi
 sed -i "s|^API_KEY=.*|API_KEY=${BROWSER_API_KEY}|" .env
 sed -i "s|^MQTT_ENABLED=.*|MQTT_ENABLED=false|" .env
+
+# Proxy residensial: tulis DI_PROXY (dipakai service di-relay) + BROWSER_PROXY
+# (dipakai browser → relay). Dihapus-dulu biar idempoten; compose .env tak
+# shell-parse jadi ';' aman literal (beda dari bash-source).
+sed -i '/^DI_PROXY=/d;/^BROWSER_PROXY=/d;/^BROWSER_UA=/d;/^BROWSER_LANG=/d' .env
+if [ -n "${DI_PROXY:-}" ]; then
+  { printf 'DI_PROXY=%s\n' "$DI_PROXY"
+    printf 'BROWSER_PROXY=socks5://di-relay:1080\n'
+    printf 'BROWSER_LANG=en-US,en;q=0.9\n'; } >> .env
+fi
 chmod 600 .env
 REMOTE
 
@@ -132,13 +153,13 @@ if ! ssh60 'find ~/browser/data/artifacts -path "*/sessions/*.json" -print -quit
 fi
 
 # ── 1.6. Build Chromium bisa >2mnt -> DETACHED + sentinel (jangan tahan channel SSH) ──
-ssh60 'bash -s' <<'REMOTE'
+ssh60 "PROFILE_ARG='$PROFILE_ARG' bash -s" <<'REMOTE'
 set -e
 cd "$HOME/browser"
 rm -f "$HOME/browser-done" "$HOME/browser-fail"
-nohup bash -c 'cd "$HOME/browser" && docker compose up -d --build && touch "$HOME/browser-done" || touch "$HOME/browser-fail"' \
+nohup bash -c "cd \"\$HOME/browser\" && docker compose ${PROFILE_ARG} up -d --build && touch \"\$HOME/browser-done\" || touch \"\$HOME/browser-fail\"" \
   > "$HOME/browser-deploy.log" 2>&1 &
-echo "  [.60] build dilepas detached (log ~/browser-deploy.log)"
+echo "  [.60] build dilepas detached (profile='${PROFILE_ARG:-none}', log ~/browser-deploy.log)"
 REMOTE
 
 # ── 3. Poll dari akses-vps sampai selesai / gagal / timeout ─────────────────
@@ -170,6 +191,16 @@ AK=$(curl -m8 -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $KEY" 
 log "health=$H  /sessions(tanpa-kunci)=$A  /sessions(dengan-kunci)=$AK"
 if [ "$H" = "200" ] && [ "$A" = "401" ] && [ "$AK" = "200" ]; then
   log "OK: .60 LIVE, auth AKTIF, kunci akses-vps cocok."
+  # ── Proxy residensial: verifikasi di-relay + egress, restart browser ──
+  if [ -n "${DI_PROXY:-}" ]; then
+    if ssh60 'docker ps --format "{{.Names}}" | grep -q "^di-relay$"' 2>/dev/null; then
+      ssh60 'docker restart browser-browser-1 >/dev/null 2>&1' || true
+      EIP=$(ssh60 'docker run --rm --network browser_default curlimages/curl:latest -s -m40 --socks5-hostname di-relay:1080 https://ifconfig.co/ip 2>/dev/null' 2>/dev/null)
+      log "proxy di-relay UP; egress residensial=${EIP:-<tak terukur>}; browser di-restart agar Chrome pakai relay."
+    else
+      log "WARN: DI_PROXY di-set tapi di-relay TAK jalan — pastikan compose --profile proxy & DI_PROXY di .env .60."
+    fi
+  fi
   # rapikan build cache (disk .60 ketat, sempat 96% pasca-build)
   ssh60 'docker builder prune -af >/dev/null 2>&1; df -h /home | tail -1' 2>/dev/null | sed 's/^/  disk .60: /'
   exit 0
