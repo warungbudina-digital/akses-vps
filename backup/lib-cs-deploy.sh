@@ -216,6 +216,39 @@ _deploy_gogobuda_impl() {
 }
 
 # ---------------------------------------------------------------------
+# deploy_gogobuda_gui — .61 JUGA host stasiun login GUI (gui-chromium +
+# di-relay, lihat gui-61/README/memori project_61_gui_vault). Instance
+# BEDA dari scraper-worker di atas (scraper-worker = python polos tanpa
+# Docker, GUI = container) -- jalan bersisian di VM yg sama, lock
+# terpisah ("gogobuda_gui") jadi tak saling tunggu.
+#
+# ⚠️ Efek nyata ditambahkan 2026-10-07: setiap kali .61 reachable (laptop
+# boot -> Cloud Shell gogobuda dibuka) cron ini akan OTOMATIS menyalakan
+# ulang GUI + proxy residensial + expose publik browser-gui.obc-crypto.com
+# TANPA user menjalankan `!` lagi. Ini perubahan sadar atas permintaan
+# user (lihat riwayat chat 2026-10-07) -- bukan default lama.
+#
+# Reuse APA ADANYA bring-up-gui-61.sh (idempoten: fast-path 401 -> exit 0
+# tanpa sync ulang; kredensial admin dibaca dari hub yg persisten, BUKAN
+# di-generate ulang tiap VM baru).
+# ---------------------------------------------------------------------
+deploy_gogobuda_gui() { _locked_deploy gogobuda_gui _deploy_gogobuda_gui_impl; }
+_deploy_gogobuda_gui_impl() {
+  local host="gogobuda65@10.66.66.61"
+  if ! reachable_cs "$host"; then
+    echo ".61 (gogobuda-gui) belum reachable."
+    return 1
+  fi
+  echo ".61 (gogobuda-gui) reachable -> bring-up GUI"
+  if bash "$HOME/akses-vps/gui-61/bring-up-gui-61.sh"; then
+    echo ".61 GUI bring-up OK (auth+egress relay terverifikasi oleh bring-up-gui-61.sh sendiri)."
+    return 0
+  fi
+  echo ".61 GUI bring-up GAGAL."
+  return 1
+}
+
+# ---------------------------------------------------------------------
 # deploy_ogis — .8, full-tool-browser (instance scraper terpisah, akun
 # maydualapan8@gmail.com / Chrome "Ogis-Chain" di laptop). Reuse
 # bring-up-browser.sh APA ADANYA lewat env override C60_HOST/BROWSER_API
