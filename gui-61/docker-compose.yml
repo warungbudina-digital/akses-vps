@@ -1,0 +1,54 @@
+# =====================================================================
+# gui-61 — stasiun login GUI on-demand di .61 (Cloud Shell gogobuda65,
+# EPHEMERAL, RAM 8GB). Chromium visual (web GUI) + egress residensial.
+# Di-deploy oleh akses-vps: ~/akses-vps/gui-61/bring-up-gui-61.sh
+#
+# network_mode: host (sengaja):
+#   - CDP Chromium (127.0.0.1:9222) bisa di-tunnel hub via `ssh -L` tanpa
+#     --remote-debugging-address (yg diabaikan Chrome headful modern).
+#   - di-relay cukup listen 127.0.0.1:1080, tak terekspos ke WG/LAN.
+#   - GUI :3000 (http) terekspos ke WG -> diproxy nginx hub (Fase 3).
+# .61 = COMPUTE saja; sesi disimpan ke vault DB-VPS (gui-session.sh),
+# profil /config ikut lenyap saat VM recycle — itu disengaja.
+# =====================================================================
+services:
+  di-relay:
+    image: ginuerzh/gost
+    container_name: di-relay
+    restart: unless-stopped
+    network_mode: host
+    command: ["-L", "socks5://127.0.0.1:1080", "-F", "${DI_PROXY:?DI_PROXY wajib (egress residensial)}"]
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: "0.3"
+
+  gui-chromium:
+    image: lscr.io/linuxserver/chromium:latest
+    container_name: gui-chromium
+    restart: unless-stopped
+    network_mode: host
+    shm_size: "1gb"
+    security_opt:
+      - seccomp:unconfined
+    depends_on: [di-relay]
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Makassar
+      - LC_ALL=id_ID.UTF-8
+      - CUSTOM_USER=${GUI_USER:?GUI_USER wajib}
+      - PASSWORD=${GUI_PASSWORD:?GUI_PASSWORD wajib}
+      - CUSTOM_PORT=3000
+      - CUSTOM_HTTPS_PORT=3001
+      - TITLE=GUI .61
+      # Proxy residensial (DNS di-resolve sisi proxy krn socks5) + CDP lokal
+      # untuk ekspor/impor sesi. WebRTC dipaksa lewat proxy agar IP asli tak bocor.
+      - CHROME_CLI=--proxy-server=socks5://127.0.0.1:1080 --force-webrtc-ip-handling-policy=disable_non_proxied_udp --remote-debugging-port=9222 --lang=id-ID
+    volumes:
+      - ./config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 4g
