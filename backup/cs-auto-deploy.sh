@@ -45,6 +45,7 @@ run_and_log deploy_balibruntattour
 # jadi konflik "instance n8n kedua" yg lama TIDAK berlaku lagi. Rollback: lihat
 # git history lib-cs-deploy.sh (_deploy_gogobuda_impl versi n8n).
 run_and_log deploy_gogobuda
+run_and_log deploy_gogobuda_gui
 # ⏸️ 2026-08-31 (permintaan user): ogis dinonaktifkan dari pipeline (bukan
 # dihapus). Lihat catatan lengkap di wake-orchestrator.sh. Aktifkan lagi:
 # hapus tanda komentar baris di bawah.
