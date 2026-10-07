@@ -26,9 +26,17 @@ fi
 ssh db-vps "sudo -n -u postgres psql -d scraper -c \"INSERT INTO vault.audit(profile_code,domain,action,node) VALUES ('$(esc "$CODE")','$(esc "$DOMAIN")','pull','hub');\"" 2>/dev/null >/dev/null || true
 
 if [ "$TO60" = 1 ]; then
+  # .60 memvalidasi platform = enum scraper (instagram|tiktok|twitter), BUKAN domain.
+  # Domain di luar enum (mis. google.com, youtube.com) tak punya scraper -> ditolak di sini.
+  case "$DOMAIN" in
+    *instagram.com) PLATFORM=instagram ;;
+    *tiktok.com)    PLATFORM=tiktok ;;
+    *twitter.com|*x.com) PLATFORM=twitter ;;
+    *) echo "vault-pull: domain $DOMAIN tak punya scraper di .60 — import dibatalkan" >&2; exit 3 ;;
+  esac
   KEY=$(grep -oE '[A-Za-z0-9]{40,}' ~/.config/browser-api/credentials.env | head -1)
   CT=$(python3 -c 'import json,sys;print(json.dumps(open(sys.argv[1]).read()))' "$OUTC")
   code=$(curl -s -m20 -o /tmp/vault-import.out -w '%{http_code}' -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-    -X POST "http://10.66.66.60:8080/sessions/${CODE}/import" -d "{\"platform\":\"${DOMAIN}\",\"cookiesTxt\":${CT}}")
+    -X POST "http://10.66.66.60:8080/sessions/${CODE}/import" -d "{\"platform\":\"${PLATFORM}\",\"cookiesTxt\":${CT}}")
   echo "  import→.60 HTTP $code: $(head -c 200 /tmp/vault-import.out)"
 fi
