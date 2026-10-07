@@ -71,5 +71,8 @@ agar kebal quote-chain bash→ssh→psql (cookies bisa berisi `'" ; spasi`).
 - ✅ **Fase 1** — schema + `vault-push.sh`/`vault-pull.sh`, round-trip teruji IDENTIK.
 - ⏳ Fase 2 — `gui-chromium` (noVNC) di `.61` + `bring-up-gui-61.sh` (restore sesi saat start, egress di-relay).
 - ⏳ Fase 3 — nginx `browser-gui.obc-crypto.com` + auth → proxy noVNC `.61`.
-- ⏳ Fase 4 — wire `.60` konsumsi vault (atasi enum platform) + cron refresh (`expires_at`).
+- ✅ Fase 4 — `vault-pull --to60` memetakan domain → platform enum `.60` (instagram|tiktok|twitter;
+  domain lain ditolak). `vault-push` mengisi `expires_at` dari cookie berexpiry paling dini.
+  `vault-check.sh` (cron 06:15 WITA harian) mencatat `expiring`/`expired` ke `vault.audit`, dedupe 24 jam.
+  Tidak ada auto-refresh: login ulang tetap manual (lihat jejak `expiring`).
 - ⏳ Fase 5 — n8n fokus di CHROME-VPS (lepas cookie-station).

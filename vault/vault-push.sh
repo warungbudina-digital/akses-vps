@@ -40,6 +40,11 @@ ON CONFLICT (profile_code,domain) DO UPDATE SET
   cookies_netscape=EXCLUDED.cookies_netscape,
   storage_state=COALESCE(EXCLUDED.storage_state,vault.session.storage_state),
   captured_at=now(), source_node=EXCLUDED.source_node;
+-- expires_at = cookie berexpiry paling dini (epoch>0) dari storage_state; NULL bila tak ada.
+-- ::numeric (bukan ::bigint): CDP mengirim expires desimal (mis. 1791956435.12).
+UPDATE vault.session SET expires_at=(SELECT to_timestamp(min((c->>'expires')::numeric))
+  FROM jsonb_array_elements(storage_state->'cookies') c WHERE (c->>'expires')::numeric > 0)
+WHERE profile_code='$(sqlstr "$CODE")' AND domain='$(sqlstr "$DOMAIN")';
 INSERT INTO vault.audit(profile_code,domain,action,node) VALUES ('$(sqlstr "$CODE")','$(sqlstr "$DOMAIN")','push','$(sqlstr "$NODE")');
 SQL
 )
