@@ -19,7 +19,7 @@
 # terjadi in-practice: `bring-up-browser.sh` otomatis restore dari backup
 # terbaru di sini kalau sessions/ lokal kosong pasca-recycle.
 #
-# Pola SAMA `ogis-vault-backup.sh` (preflight no-op anggun + validasi +
+# Pola SAMA skrip backup lain di sini (preflight no-op anggun + validasi +
 # rotasi), TAPI tujuan Gdrive (bukan DB-VPS) -- pilihan user 2026-08-30,
 # reuse folder Project-Tutorial yg sudah ada dari project lain.
 #

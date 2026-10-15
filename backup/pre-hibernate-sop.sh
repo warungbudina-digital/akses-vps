@@ -23,12 +23,9 @@ ADMIN_KEY="$HOME/.ssh/akses-vps-cloudshell-admin"
 SSHOPT="-i $ADMIN_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
 
 # Node Cloud Shell: label=IP:user
-# ⚠️ 2026-08-31 pagi: `ogis` (.8) ditemukan TERTINGGAL di sini sejak lahir 29/8
-# -- container-nya tak pernah ikut dihentikan sblm hibernate; sempat ditambahkan.
-# ⏸️ 2026-08-31 siang: ogis lalu DINONAKTIFKAN dari pipeline (permintaan user),
-# jadi .8 dikeluarkan lagi. Kalau ogis diaktifkan kembali, tambahkan balik
-# `10.66.66.8:maydualapan8` di sini DAN "Profile 11" di daftar patch exit_type
-# di bawah. Lihat catatan lengkap di wake-orchestrator.sh.
+# (`ogis` / .8 / maydualapan8 — node dekomisioning 2026-10-15: peer WG
+# dihapus, deploy_ogis + ogis-vault dibuang dari repo. Lihat catatan sisa
+# di blok patch exit_type Chrome di bawah soal "Profile 11".)
 NODES="10.66.66.50:warungbudina 10.66.66.60:balibruntattour 10.66.66.61:gogobuda65"
 
 say "=== SOP pra-hibernasi MULAI (dry-run=$DRY) ==="
@@ -69,14 +66,18 @@ if timeout 8 ssh -o ConnectTimeout=6 -o BatchMode=yes ltap-mini 'exit' 2>/dev/nu
     # AUTO-RESTORE sesi/tab lama (persis yg dikeluhkan user "sisa aplikasi kemarin
     # masih ada"). Makanya SETELAH proses benar2 mati, exit_type dipatch manual
     # jadi "Normal" di file Preferences tiap profil Cloud Shell (Profile 10/26/29
-    # = yuni/gogobuda/balibruntattour) DAN "Profile 11" (ogis).
-    # ⚠️ Profile 11 SENGAJA tetap dipatch meski ogis sudah dinonaktifkan:
-    # menonaktifkan ogis di skrip kita TIDAK mencegah Chrome membukanya sendiri.
-    # Chrome punya daftar "last_active_profiles" di Local State dan memulihkan
-    # jendela profil itu saat start, apalagi kalau exit_type tertinggal "Crashed".
-    # Kasus nyata 31/8 (ditemukan USER lewat pengamatan langsung): ogis dipulihkan
-    # PALING AWAL -> laptop memuat 4 tab Cloud Shell, bukan 3 -> `yuni` (jadi tab
-    # keempat) selalu gagal & Chrome crash, termasuk pada boot bersih.
+    # = yuni/gogobuda/balibruntattour) DAN "Profile 11" (dulu "ogis", Chrome
+    # profile "Ogis-Chain" — node .8-nya sendiri sudah didekomisioning 2026-10-15,
+    # tapi profil Chrome fisiknya masih ada di laptop).
+    # ⚠️ Profile 11 SENGAJA TETAP dipatch walau node ogis sudah dibuang total:
+    # ini bukan soal pipeline deploy kita, tapi Chrome punya daftar
+    # "last_active_profiles" di Local State dan memulihkan jendela profil itu
+    # sendiri saat start, apalagi kalau exit_type tertinggal "Crashed" — lepas
+    # dari apakah kita masih memakai node di baliknya.
+    # Kasus nyata 31/8 (ditemukan USER lewat pengamatan langsung, waktu ogis
+    # masih aktif): profil ini dipulihkan PALING AWAL -> laptop memuat 4 tab
+    # Cloud Shell, bukan 3 -> `yuni` (jadi tab keempat) selalu gagal & Chrome
+    # crash, termasuk pada boot bersih.
     # — teknik standar cegah restore-prompt,
     # TAK menyentuh password/cookies/history, cuma flag housekeeping ini.
     PS_KILL='$procs=@(Get-Process chrome -ErrorAction SilentlyContinue); $n=$procs.Count; foreach ($p in $procs) { if ($p.MainWindowHandle -ne 0) { [void]$p.CloseMainWindow() } }; Start-Sleep -Seconds 4; $remain=@(Get-Process chrome -ErrorAction SilentlyContinue); if ($remain.Count -gt 0) { $remain | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }; $base="C:\Users\warungbudina\AppData\Local\Google\Chrome\User Data"; foreach ($t in @("Profile 10","Profile 26","Profile 29","Profile 11")) { $pf=Join-Path $base "$t\Preferences"; if (Test-Path $pf) { $raw=Get-Content $pf -Raw; $new=$raw -replace '"'"'"exit_type"\s*:\s*"[^"]+"'"'"', '"'"'"exit_type":"Normal"'"'"'; $new=$new -replace '"'"'"exited_cleanly"\s*:\s*(true|false)'"'"', '"'"'"exited_cleanly":true'"'"'; if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 } } }; Write-Output ("chrome proc: "+$n+" -> "+(@(Get-Process chrome -ErrorAction SilentlyContinue)).Count+" (exit_type dipatch Normal)")'

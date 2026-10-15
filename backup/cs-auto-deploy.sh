@@ -2,7 +2,7 @@
 # =====================================================================
 # cs-auto-deploy.sh — cron poller (HUB akses-vps): JARING PENGAMAN yang
 # jalan tiap 5 menit sepanjang hari. Kalau profil Cloud Shell laptop
-# (yuni/.50, balibruntattour/.60, gogobuda/.61, ogis/.8) reachable tapi projectnya
+# (yuni/.50, balibruntattour/.60, gogobuda/.61) reachable tapi projectnya
 # belum/tak lagi sehat (mis. VM Cloud Shell di-refresh manual siang hari,
 # atau container sempat mati), skrip ini idempoten membangunkannya lagi.
 #
@@ -46,9 +46,5 @@ run_and_log deploy_balibruntattour
 # git history lib-cs-deploy.sh (_deploy_gogobuda_impl versi n8n).
 run_and_log deploy_gogobuda
 run_and_log deploy_gogobuda_gui
-# ⏸️ 2026-08-31 (permintaan user): ogis dinonaktifkan dari pipeline (bukan
-# dihapus). Lihat catatan lengkap di wake-orchestrator.sh. Aktifkan lagi:
-# hapus tanda komentar baris di bawah.
-# run_and_log deploy_ogis
 
 log "cs-auto-deploy selesai."
