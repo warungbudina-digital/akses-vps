@@ -122,52 +122,27 @@ login medsos WAJIB lewat browser laptop SUARAHATI, bukan tempat lain) dan
 `project_medsos_agent.md` bagian 2026-08-25 (kronologi lengkap perancangan
 + semua bug yang ditemukan/difix selama membangun skrip ini).
 
-## Riset tren TikTok (`tiktok_trend.py`) — ditambahkan 2026-09-25
+## ⛔ Riset tren TikTok — DIHAPUS TOTAL 2026-10-16 (keputusan user)
 
-Pantau watchlist kreator niche AI/tech → statistik video ke DB-VPS schema
-`trend` → laporan Markdown mingguan (+ ringkasan Telegram). Tujuannya bahan ide
-konten Go Go Bud: hook, format (video vs carousel), durasi, hashtag, jam posting
-yang sedang bekerja di niche ini.
+Dulu ada `tiktok_trend.py`/`tiktok_trend_report.py`/`tiktok-trend-cron.sh`/
+`tiktok_watchlist.json`/`tiktok_trend_schema.sql` di sini (scraping anonim via
+browser Cloud Shell `.60`, lihat riwayat git kalau perlu detail teknis). **Dibuang
+bersama dokumentasinya**, bukan sekadar dinonaktifkan, dengan 2 alasan nyata:
+1. Scraping anonim terus-menerus kena CAPTCHA/WAF — rapuh secara struktural,
+   bukan bug yang bisa difix sekali.
+2. **Jadi akar bug tersembunyi 48 hari**: lapisan keputusan (`viral_scorecard.py`)
+   selalu meng-enqueue video TikTok ke analyzer `.50`, tapi `orchestrator.py`
+   (`~/akses-vps/viral-pipeline/`) TAK PERNAH mendukung TikTok — jadi 15/15 job
+   berakhir `dead`, nol analisa baru sejak 29 Agustus, meski cron lapor sukses
+   setiap hari (lihat memori `project_viral_analyzer.md`, audit 16/10).
 
-| File | Fungsi |
-|---|---|
-| `tiktok_watchlist.json` | daftar akun dipantau + setelan volume/jeda |
-| `tiktok_trend.py` | pengumpul (browser API Cloud Shell .60 → DB-VPS) |
-| `tiktok_trend_report.py` | laporan → `reports/tiktok-trend-<tgl>.md` (`--telegram` = ringkasan) |
-| `tiktok-trend-cron.sh` | entrypoint cron: maks 1 run sukses/hari, laporan Telegram tiap Senin |
-| `tiktok_trend_schema.sql` | skema `trend.*` (idempoten) |
+Diganti sepenuhnya oleh `social_trend.py` (Instagram+YouTube) di bawah, yang
+akses platformnya LANGSUNG via akun Go Go Bud sendiri (token Page Graph API,
+YouTube publik) — bukan menyamar sebagai pengunjung anonim, jadi bebas dari
+hambatan firewall/anti-bot, DAN `orchestrator.py` sudah mendukung kedua
+platform ini sejak awal (memperbaiki bug #2 di atas sebagai efek samping).
 
-```bash
-python3 tiktok_trend.py --check @handle1 @handle2   # cek akun sebelum masuk watchlist
-python3 tiktok_trend.py --dry-run --only tommythings # uji tanpa tulis DB
-python3 tiktok_trend_report.py --days 30             # buat laporan sekarang
-tail -f ~/tiktok-trend.log                           # log cron
-```
-
-**Jalur data (diuji dari IP Cloud Shell, pengunjung anonim):** `/tag/` & `/discover/`
-ditolak; halaman profil memicu CAPTCHA saat memuat daftar video; **widget embed
-`/embed/@handle`** memberi info user + ±13 video tanpa CAPTCHA → dipakai; halaman
-video memberi statistik lengkap (SSR). Waktu unggah juga bisa dari ID (`id >> 32`).
-
-**Jebakan yg sudah ditangani:**
-- **MTU hub→.60**: wg0 hub 1420 vs .60 1380 → body HTTP >~1.3KB ke .60 menggantung
-  selamanya. Butuh rute `10.66.66.60/32 mtu 1380` di hub (permanen via
-  `~/akses-vps/wireguard/persist-mtu-cloudshell60.sh`). Collector memeriksa ini di
-  awal dan GAGAL dgn pesan jelas kalau rutenya hilang.
-- **Baca halaman sebelumnya**: jeda tetap setelah navigate pernah membaca halaman
-  lama → sekarang tunggu sampai URL cocok target + cek handle/ID hasil = target.
-- **Carousel foto** (Photo Mode) durasinya 0 → dicatat `media_type=photo`, durasi NULL.
-- Akun tak ada: embed `isError:true`. CAPTCHA → run berhenti (exit 2), bukan dipaksa.
-- **Profil remote-cdp .60 berbagi SATU halaman** & video autoplay yg ditinggal membuat
-  .60 150% CPU → collector `quiet()` (pause+kosongkan `<video>`) tiap video dan `park()`
-  tab ke about:blank di akhir run. Kalau tetap lambat: restart container browser .60.
-- `wait` kadang 500 saat TikTok redirect internal → diulang 3×; error per-video tak
-  menggagalkan akun. `resource-block` API tak bisa dipakai via HTTP (schema buang `types`).
-- Video "not available in your country" = diblokir wilayah IP .60 (Singapura), bukan error.
-- Status per akun membedakan `ok`/`no_videos` (terukur) dari `captcha`/`error`/`not_found`
-  (gagal mengukur) — laporan menampilkan kesehatan pengumpulan di bagian atas.
-
-### Instagram + YouTube (`social_trend.py`) — ditambahkan 2026-09-25
+## Instagram + YouTube (`social_trend.py`) — ditambahkan 2026-09-25, SATU-SATUNYA sumber tren sejak 16/10
 5 akun teratas per platform di `social_watchlist.json` (niche AI/tech/skill digital
 Indonesia, aktif, urut pengikut, tanpa media berita). Jalan penuh dari hub — TIDAK
 butuh .60/laptop:

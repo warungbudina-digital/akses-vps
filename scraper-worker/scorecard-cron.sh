@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Cron wrapper viral_scorecard.py (HUB akses-vps). Dijadwalkan SETELAH slot scrape .61.
-# Baca trend.* -> skor tertimbang -> trend.viral_score. Untuk top-10:
+# Cron wrapper viral_scorecard.py (HUB akses-vps). Dijadwalkan SETELAH slot scrape
+# social-trend-cron.sh (IG+YouTube, jalan dari hub -- TikTok/.61 dihapus 16/10).
+# Baca trend.social_* -> skor tertimbang -> trend.viral_score. Untuk top-10:
 #   - enqueue video ke analyzer .50 (asinkron: dim Hook/Pacing/Rewatch/Emosi diisi
 #     run BERIKUTNYA setelah orchestrator drain, pola analyzer-pipeline-trigger).
 #   - Gemini via ai_wiki_query -> RN7 (kalau RN7 mati, dim Relate/Universal = pending;

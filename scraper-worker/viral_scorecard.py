@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """Viral Scorecard — lapisan KEPUTUSAN (jalan di HUB akses-vps).
 
-Baca metrik objektif dari DB-VPS `trend.*` (hasil scraper .61) → hitung skor
-tertimbang 4-grup → zonasi 🟢🟡🔴 → tulis `trend.viral_score`.
+Baca metrik objektif dari DB-VPS `trend.social_*` (Instagram + YouTube, via
+akun Go Go Bud sendiri — `social_trend.py`) → hitung skor tertimbang 4-grup →
+zonasi 🟢🟡🔴 → tulis `trend.viral_score`.
+
+⛔ TikTok DIHAPUS 2026-10-16 (keputusan user). Dulu sumber Tier-1 SATU-SATUNYA
+= scraper TikTok anonim (`trend.tiktok_*`) yang terus kena CAPTCHA/WAF, DAN
+ternyata jadi akar bug tersembunyi 48 hari: `orchestrator.py` tak pernah
+dukung TikTok, jadi SETIAP enqueue Tier-2 berakhir `status=dead` (nol analisa
+baru sejak 29/8 — lihat project_viral_analyzer.md). Diganti akses platform
+MILIK Go Go Bud yang sudah TERBUKTI nyata jalan (Graph API Business
+Discovery + YouTube publik) — sekaligus MEMPERBAIKI bug itu, krn
+`orchestrator.py` SUDAH mendukung youtube/instagram sejak awal.
 
 Model (bisa disetel di scorecard.config.json):
   Total = G1*0.30 + G2*0.30 + G3*0.20 + G4*0.20 ; tiap grup = rata-rata sub-kriteria (1..5)
@@ -10,11 +20,16 @@ Model (bisa disetel di scorecard.config.json):
   Grup: G1 Algoritma/Retensi(Hook,Pacing,Rewatch) · G2 Psikologi/Share(Emosi,Relate,NilaiBerbagi)
         G3 Relevansi/Tren(TrendJacking,Universalitas) · G4 Feasibility(KecepatanEksekusi,BiayaVsHasil)
 
-Sumber tiap dimensi (keputusan 27/9):
-  scraper (objektif, SEMUA kandidat) : NilaiBerbagi (save/share-rate) · TrendJacking (plays vs median akun)
-  analyzer .50 (Tier-2, top-K)       : Hook · Pacing · Rewatch · Emosi   [STUB: butuh download+analisa video]
+Sumber tiap dimensi (REVISI 16/10 — IG/YouTube tak punya save/share-count publik,
+beda dari TikTok):
+  scraper (objektif, SEMUA kandidat) : NilaiBerbagi (like+comment-rate, BUKAN lagi save/share)
+                                        · TrendJacking (views vs median akun)
+  analyzer .50 (Tier-2, top-K)       : Hook · Pacing · Rewatch · Emosi (IR nyata, via enqueue)
   Gemini via ai_wiki_query (Tier-2)  : Relatabilitas · Universalitas
   heuristik                          : KecepatanEksekusi · BiayaVsHasil
+                                        [⚠️ s_speed butuh durasi video — IG/YT
+                                        belum menangkap field ini di social_trend.py,
+                                        jadi SELALU None/pending utk saat ini, bukan bug]
 
 Penyaringan bertingkat: Tier-1 objektif utk semua → ranking → hanya top-K (default 10)
 dapat Tier-2 (analyzer+Gemini). Dimensi yg belum ada = pending (NULL); total provisional
@@ -36,6 +51,7 @@ import time
 import uuid
 from pathlib import Path
 from statistics import median
+from urllib.parse import urlparse, parse_qs
 
 HERE = Path(__file__).resolve().parent
 DB_SSH = ["ssh", "-o", "BatchMode=yes", "db-vps"]
@@ -104,17 +120,22 @@ def q(v):
 
 
 def fetch_candidates(run_id: str | None):
-    """Snapshot video TERBARU per video (opsional dibatasi 1 run) + meta."""
-    cond = "s.plays IS NOT NULL AND s.plays > 0"
+    """Snapshot post TERBARU per (platform,post_id) dari trend.social_post(+snapshot)
+    -- Instagram+YouTube, akun Go Go Bud sendiri (social_trend.py). Field `shares`/
+    `saves`/`duration_s` TAK ADA di schema ini (beda dari TikTok lama) -- lihat
+    score_video() utk bagaimana itu ditangani."""
+    cond = "s.views IS NOT NULL AND s.views > 0"
     if run_id:
         cond = f"s.run_id = {q(run_id)} AND " + cond
     return db_json(f"""
-      SELECT v.video_id, v.handle, v.description, v.hashtags, v.duration_s,
-             s.plays, s.likes, s.comments, s.shares, s.saves, s.run_id
-      FROM trend.tiktok_video v
+      SELECT p.platform, p.post_id AS video_id, p.handle, p.caption AS description,
+             p.hashtags, p.url,
+             s.views AS plays, s.likes, s.comments, s.run_id
+      FROM trend.social_post p
       JOIN LATERAL (
-        SELECT * FROM trend.tiktok_video_snapshot s2
-        WHERE s2.video_id = v.video_id ORDER BY taken_at DESC LIMIT 1
+        SELECT * FROM trend.social_post_snapshot s2
+        WHERE s2.platform = p.platform AND s2.post_id = p.post_id
+        ORDER BY s2.run_id DESC LIMIT 1
       ) s ON true
       WHERE {cond}
     """)
@@ -176,12 +197,36 @@ HOOK_MAP = {"strong_hook": 5.0, "medium_hook": 3.5, "weak_hook": 2.0, "no_hook":
 EMO_NEUTRAL = {"neutral face", "unknown", "no face", ""}
 
 
-def _fetch_ir(video_id: str):
-    """Ambil IR (analysis jsonb) analyzer .50 utk video TikTok ini, atau None."""
+def external_id_for_enqueue(url: str, platform: str) -> str:
+    """Replika PERSIS `detect()` di viral-pipeline/enqueue.py (platform relevan di sini
+    saja). WAJIB identik -- _fetch_ir() mencocokkan balik pakai nilai ini thd
+    media.video_ingest.external_id yang DITULIS enqueue.py. Instagram KHUSUS: post_id
+    Graph API (numerik) != shortcode di URL permalink; enqueue.py parse SHORTCODE dari
+    URL (bukan post_id), jadi kita wajib ikut itu -- kalau pakai post_id mentah di sini,
+    match akan SELALU gagal (persis kelas bug "TikTok tak didukung" yg baru ditemukan:
+    insert pakai 1 id, query pakai id lain, dua-duanya "sukses" sendiri2 tapi tak pernah
+    bertemu)."""
+    path = urlparse(url).path
+    if platform == "youtube":
+        qs = parse_qs(urlparse(url).query)
+        if qs.get("v"):
+            return qs["v"][0]
+        m = re.search(r"/(?:shorts|embed|live)/([^/?&]+)", path)
+        return m.group(1) if m else ""
+    if platform == "instagram":
+        m = re.search(r"/(?:reel|reels|p|tv)/([^/?&]+)", path)
+        return m.group(1) if m else ""
+    return ""
+
+
+def _fetch_ir(platform: str, external_id: str):
+    """Ambil IR (analysis jsonb) analyzer .50 utk post ini, atau None."""
+    if not external_id:
+        return None
     rows = db_json(
         "SELECT va.analysis FROM media.video_analysis va "
         "JOIN media.video_ingest vi ON vi.id = va.ingest_id "
-        f"WHERE vi.platform = 'tiktok' AND vi.external_id = {q(video_id)} "
+        f"WHERE vi.platform = {q(platform)} AND vi.external_id = {q(external_id)} "
         "ORDER BY va.id DESC LIMIT 1")
     return rows[0]["analysis"] if rows else None
 
@@ -216,16 +261,19 @@ def map_ir_to_dims(a: dict) -> dict:
     return {"s_hook": s_hook, "s_pacing": s_pacing, "s_rewatch": s_rewatch, "s_emosi": s_emosi}
 
 
-def analyzer_ir(video_id: str, handle: str):
+def analyzer_ir(platform: str, url: str):
     """IR analyzer .50 → 4 dim. ASINKRON: kalau IR sudah ada di media.video_analysis
-    → petakan+kembalikan; kalau belum → enqueue URL TikTok (analyzer proses saat drain
+    → petakan+kembalikan; kalau belum → enqueue URL asli (analyzer proses saat drain
     .50 berikutnya, pola analyzer-pipeline-trigger.sh) → kembalikan None (pending).
-    Run scorecard BERIKUTNYA (stlh drain) yang mengisi 4 dim ini."""
-    ir = _fetch_ir(video_id)
+    Run scorecard BERIKUTNYA (stlh drain) yang mengisi 4 dim ini.
+    `platform` di sini HARUS 'youtube'/'instagram' -- `orchestrator.py` sudah
+    mendukung keduanya dari awal (COOKIES dict), beda dari TikTok yg TAK PERNAH
+    didukung (akar bug 48 hari yg dibuang bersama TikTok 16/10)."""
+    eid = external_id_for_enqueue(url, platform)
+    ir = _fetch_ir(platform, eid)
     if ir:
         return map_ir_to_dims(ir)
     if ENQUEUE_ENABLED:
-        url = f"https://www.tiktok.com/@{handle}/video/{video_id}"
         try:
             subprocess.run(["python3", ENQUEUE, "viral_video", url],
                            capture_output=True, text=True, timeout=30)  # idempoten (ON CONFLICT)
@@ -254,14 +302,17 @@ def heuristik_feasibility(cand, s_share, cfg):
 def score_video(cand, handle_median_plays, cfg, tier2: bool, use_llm: bool):
     th = cfg["thresholds"]
     plays = cand["plays"]
-    sr = rate(cand.get("saves"), plays)
-    shr = rate(cand.get("shares"), plays)
-    # G2 NilaiBerbagi (scraper): blend save-rate (utama) + share-rate
+    # G2 NilaiBerbagi (scraper): blend like-rate + comment-rate.
+    # ⚠️ REVISI 16/10: dulu (TikTok) pakai save-rate+share-rate -- IG Business
+    # Discovery & YouTube RSS TAK PERNAH expose save/share count publik, jadi
+    # proxy diganti like+comment (keduanya SELALU ada di trend.social_post_snapshot).
+    lr = rate(cand.get("likes"), plays)
+    cr = rate(cand.get("comments"), plays)
     s_share = None
-    ns = scale(sr, *_lohi(th, "save_rate_pct", 0.1, 3.0))
-    nh = scale(shr, *_lohi(th, "share_rate_pct", 0.1, 2.0))
-    if ns is not None or nh is not None:
-        vals = [v for v in (ns, nh) if v is not None]
+    nl = scale(lr, *_lohi(th, "like_rate_pct", 1.0, 10.0))
+    nc = scale(cr, *_lohi(th, "comment_rate_pct", 0.05, 1.0))
+    if nl is not None or nc is not None:
+        vals = [v for v in (nl, nc) if v is not None]
         s_share = round(sum(vals) / len(vals), 2)
     # G3 TrendJacking (scraper): plays vs median akun
     s_trend = None
@@ -273,7 +324,7 @@ def score_video(cand, handle_median_plays, cfg, tier2: bool, use_llm: bool):
     sources = {"s_share": "scraper", "s_trend": "scraper"}
 
     if tier2:
-        ir = analyzer_ir(cand["video_id"], cand["handle"])
+        ir = analyzer_ir(cand["platform"], cand["url"])
         for k in ("s_hook", "s_pacing", "s_rewatch", "s_emosi"):
             v = (ir or {}).get(k)
             dims[k] = v
@@ -346,30 +397,34 @@ def main() -> int:
     if not cands:
         print("tak ada kandidat video (jalankan scraper dulu).")
         return 0
-    # median plays per handle (utk Trend Jacking)
+    # median plays per (platform,handle) utk Trend Jacking -- KUNCI HARUS ikut
+    # platform juga: watchlist punya handle yg SAMA di 2 platform (mis. "sazporto"
+    # ada di IG & YouTube) -- keyed cuma by-handle akan mencampur views dua
+    # platform beda jadi 1 median, keliru.
     by_handle = {}
     for c in cands:
-        by_handle.setdefault(c["handle"], []).append(c["plays"])
-    med = {h: median(v) for h, v in by_handle.items()}
+        by_handle.setdefault((c["platform"], c["handle"]), []).append(c["plays"])
+    med = {k: median(v) for k, v in by_handle.items()}
 
     # Tier-1 utk semua → ranking
-    tier1 = [(c, score_video(c, med[c["handle"]], cfg, tier2=False, use_llm=False)) for c in cands]
+    tier1 = [(c, score_video(c, med[(c["platform"], c["handle"])], cfg, tier2=False, use_llm=False)) for c in cands]
     tier1.sort(key=lambda cs: (cs[1]["total"] or 0), reverse=True)
-    top_ids = {c["video_id"] for c, _ in tier1[:top_k]}
+    top_ids = {(c["platform"], c["video_id"]) for c, _ in tier1[:top_k]}
 
     rows = []
     for c in cands:
-        res = score_video(c, med[c["handle"]], cfg, tier2=(c["video_id"] in top_ids), use_llm=not args.no_llm)
+        res = score_video(c, med[(c["platform"], c["handle"])], cfg,
+                           tier2=((c["platform"], c["video_id"]) in top_ids), use_llm=not args.no_llm)
         rows.append((c, res))
     rows.sort(key=lambda cr: (cr[1]["total"] or 0), reverse=True)
 
-    print(f"{'total':>6} {'zone':>7} {'g1':>4} {'g2':>4} {'g3':>4} {'g4':>4}  {'✓':>1}  @handle  caption")
+    print(f"{'total':>6} {'zone':>7} {'g1':>4} {'g2':>4} {'g3':>4} {'g4':>4}  {'✓':>1}  platform @handle  caption")
     for c, r in rows:
         z = {"green": "🟢", "yellow": "🟡", "red": "🔴", None: "·"}[r["zone"]]
         tot = f"{r['total']:.2f}" if r["total"] is not None else "  – "
         gg = lambda k: f"{r[k]:.1f}" if r[k] is not None else " – "
         print(f"{tot:>6} {z:>5} {gg('g1'):>4} {gg('g2'):>4} {gg('g3'):>4} {gg('g4'):>4}  "
-              f"{'Y' if r['complete'] else 'p'}  @{c['handle']}  {(c.get('description') or '')[:38]}")
+              f"{'Y' if r['complete'] else 'p'}  {c['platform']:9} @{c['handle']}  {(c.get('description') or '')[:38]}")
 
     if args.dry_run:
         print("\n[dry-run] tidak menulis DB.")
@@ -378,9 +433,9 @@ def main() -> int:
     sql = []
     for c, r in rows:
         sql.append(
-            "INSERT INTO trend.viral_score (run_id,video_id,s_hook,s_pacing,s_rewatch,"
+            "INSERT INTO trend.viral_score (run_id,platform,video_id,s_hook,s_pacing,s_rewatch,"
             "s_emosi,s_relate,s_share,s_trend,s_universal,s_speed,s_roi,g1,g2,g3,g4,total,zone,complete,sources) "
-            f"VALUES ({q(score_run)},{q(c['video_id'])},{q(r['s_hook'])},{q(r['s_pacing'])},{q(r['s_rewatch'])},"
+            f"VALUES ({q(score_run)},{q(c['platform'])},{q(c['video_id'])},{q(r['s_hook'])},{q(r['s_pacing'])},{q(r['s_rewatch'])},"
             f"{q(r['s_emosi'])},{q(r['s_relate'])},{q(r['s_share'])},{q(r['s_trend'])},{q(r['s_universal'])},"
             f"{q(r['s_speed'])},{q(r['s_roi'])},{q(r['g1'])},{q(r['g2'])},{q(r['g3'])},{q(r['g4'])},"
             f"{q(r['total'])},{q(r['zone'])},{q(r['complete'])},{q(r['sources'])});")

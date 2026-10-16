@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Riset tren lintas platform (Instagram + YouTube) → DB-VPS schema `trend.social_*`.
 
-Pendamping tiktok_trend.py. Berbeda dgn TikTok, dua platform ini TIDAK butuh
-browser .60 (jalan penuh dari hub, jadi tak tergantung laptop/Cloud Shell):
+⛔ 2026-10-16: TikTok (dulu `tiktok_trend.py`, berdampingan dgn file ini) DIHAPUS
+TOTAL dari sistem riset tren (keputusan user, lihat project_viral_analyzer.md
+di memori Claude). File ini SEKARANG SATU-SATUNYA sumber Tier-1 Viral Scorecard.
+Dua platform ini TIDAK butuh browser .60 (jalan penuh dari hub, jadi tak
+tergantung laptop/Cloud Shell):
   - Instagram: Graph API **Business Discovery** memakai token Page gogobud
     (`~/.config/meta-gogobud/app.env`). Resmi, tanpa scraping. Hanya bisa membaca
     akun Business/Creator (akun pribadi → "Invalid user id"). Reels memberi view_count.

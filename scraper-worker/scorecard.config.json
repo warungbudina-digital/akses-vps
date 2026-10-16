@@ -4,9 +4,9 @@
   "zones": { "green": 4.2, "yellow": 3.0 },
   "top_k": 10,
   "thresholds": {
-    "save_rate_pct":   { "lo": 0.1, "hi": 3.0, "_": "-> Nilai Berbagi (G2). save-rate median niche ~0.1%, kuat ~3%+" },
-    "share_rate_pct":  { "lo": 0.1, "hi": 2.0 },
-    "trend_ratio":     { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). plays video / median plays akun. >1 = di atas baseline" },
-    "duration_fast_s": { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). makin pendek/simpel makin cepat dibuat" }
+    "like_rate_pct":    { "lo": 1.0, "hi": 10.0, "_": "-> Nilai Berbagi (G2). like-rate median niche ~1%, kuat ~10%+ (REVISI 16/10, IG/YT tak expose save/share-rate publik, lihat viral_scorecard.py docstring)" },
+    "comment_rate_pct": { "lo": 0.05, "hi": 1.0 },
+    "trend_ratio":      { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). views video / median views akun. >1 = di atas baseline" },
+    "duration_fast_s":  { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). TAK TERPAKAI saat ini -- social_trend.py belum menangkap durasi video IG/YT, s_speed selalu pending. Dibiarkan utk saat field itu ditambahkan." }
   }
 }
