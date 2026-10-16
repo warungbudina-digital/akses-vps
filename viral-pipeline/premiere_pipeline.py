@@ -74,7 +74,21 @@ def save_state(d):
 
 
 def rclone_lsjson(remote):
-    r = subprocess.run(["rclone", "lsjson", remote], capture_output=True, text=True, timeout=30)
+    # (2026-10-16 fix) gfootage: pakai shared/retiring Google Drive client_id
+    # rclone -> sering kena RATE_LIMIT_EXCEEDED dari Google, dan pacer rclone
+    # otomatis backoff-retry (terukur 16-18s sekali kena) SEBELUM akhirnya
+    # berhasil sendiri. timeout=30 lama TERBUKTI motong di tengah retry itu
+    # (2x berturut gagal saat cron, padahal re-run manual < 1 menit kemudian
+    # selalu sukses) -> dinaikkan ke 90s (margin di atas backoff terukur,
+    # TANPA bikin scan jadi sungguhan macet lama krn kasus normal tetap <2s).
+    # Exception DITANGKAP di sini (bukan dibiarkan traceback) krn ini kondisi
+    # TRANSIENT yg akan sembuh sendiri di tick cron berikutnya (*/15menit) --
+    # bukan error yg perlu menghentikan proses/menumpuk traceback di log.
+    try:
+        r = subprocess.run(["rclone", "lsjson", remote], capture_output=True, text=True, timeout=90)
+    except subprocess.TimeoutExpired:
+        log("rclone lsjson TIMEOUT 90s (kemungkinan rate-limit Google Drive shared client_id) -- lewati, coba lagi tick berikutnya.")
+        return []
     if r.returncode != 0:
         log(f"rclone lsjson GAGAL: {r.stderr.strip()[:200]}")
         return []
@@ -266,6 +280,15 @@ def main():
     p_appr.add_argument("--go", action="store_true")
     args = ap.parse_args()
     fn = {"scan": cmd_scan, "list": cmd_list, "skip": cmd_skip, "approve": cmd_approve}[args.cmd]
+    if args.cmd == "scan":
+        # cron tiap 15mnt, tanpa pengawasan -- jangan biarkan exception tak
+        # terduga (network/API eksternal apa pun) jadi traceback mentah di
+        # log; cukup WARN, tick berikutnya coba lagi sendiri.
+        try:
+            sys.exit(fn(args) or 0)
+        except Exception as e:
+            log(f"WARN scan gagal tak terduga: {e}")
+            sys.exit(0)
     sys.exit(fn(args) or 0)
 
 
