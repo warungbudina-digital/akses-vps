@@ -27,7 +27,10 @@ WATCH="${2:-}"
 case "$PROFILE" in
   yuni)             CS_HOST="warungbudina@10.66.66.50";    DEPLOY_FN="deploy_yuni" ;;
   balibruntattour)  CS_HOST="balibruntattour@10.66.66.60"; DEPLOY_FN="deploy_balibruntattour" ;;
-  gogobuda)         CS_HOST="gogobuda65@10.66.66.61";       DEPLOY_FN="deploy_gogobuda" ;;
+  # ⛔ 2026-10-16: deploy_gogobuda() (scraper-worker TikTok) DIHAPUS dari
+  # lib-cs-deploy.sh -- .61 sekarang cuma punya peran GUI-login, jadi target
+  # deploy utk profil ini dialihkan ke deploy_gogobuda_gui.
+  gogobuda)         CS_HOST="gogobuda65@10.66.66.61";       DEPLOY_FN="deploy_gogobuda_gui" ;;
   *)
     echo "Usage: $0 <yuni|balibruntattour|gogobuda> [--watch]" >&2
     exit 2
