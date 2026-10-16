@@ -30,6 +30,9 @@ $profiles = @('balibruntattour','gogobuda','yuni')
 $startDelaySec = 420    # jeda 7 menit sejak logon (permintaan user)
 $timeWaitSec = 600      # tunggu sync waktu maks 10 menit
 $gapSec = 60            # jeda antar profil (beri Chrome napas)
+# (2026-10-16 fix) lihat catatan sama di shutdown-watchdog.ps1 -- Preferences
+# bisa bloat >1GB; patch exit_type di Gerbang 3 di bawah pakai batas ini juga.
+$maxPatchBytes = 50MB
 
 function Log($m) {
   $line = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m
@@ -103,10 +106,15 @@ foreach ($t in @('Profile 10','Profile 26','Profile 29','Profile 11')) {
   $pf = Join-Path $chromeBase "$t\Preferences"
   if (Test-Path $pf) {
     try {
-      $raw = Get-Content $pf -Raw
-      $new = $raw -replace '"exit_type"\s*:\s*"[^"]+"', '"exit_type":"Normal"'
-      $new = $new -replace '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true'
-      if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8; Log ("  {0}: exit_type dipatch Normal (cegah restore tab lama)." -f $t) }
+      $pfLen = (Get-Item -LiteralPath $pf).Length
+      if ($pfLen -gt $maxPatchBytes) {
+        Log ("  WARN {0}: Preferences {1}MB > batas {2}MB -- SKIP patch (dicurigai bloat)." -f $t, [math]::Round($pfLen/1MB), [math]::Round($maxPatchBytes/1MB))
+      } else {
+        $raw = Get-Content $pf -Raw
+        $new = $raw -replace '"exit_type"\s*:\s*"[^"]+"', '"exit_type":"Normal"'
+        $new = $new -replace '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true'
+        if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8; Log ("  {0}: exit_type dipatch Normal (cegah restore tab lama)." -f $t) }
+      }
     } catch {}
   }
 }

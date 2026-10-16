@@ -24,6 +24,14 @@ $limitHours = 14
 $warnSec = 120          # jeda peringatan sebelum benar-benar mati
 $pollSec = 60
 $heartbeatMin = 60      # tulis 1 baris tiap 60 menit biar kelihatan hidup
+# (2026-10-16 fix) Preferences bisa bloat ke >1GB (ketemu 2x: yuni 7/9,
+# gogobuda 16/10 -- 1606MB) krn sebab yg belum dipahami penuh. Patch di
+# bawah dulu TAK bersyarat: Get-Content -Raw thd file sebesar itu di CPU
+# 1,4GHz bikin shutdown melambat (1m01s normal -> 3m30s saat gogobuda
+# bloat) dan PERNAH memicu SSH macet total saat dicoba di-parse jarak jauh.
+# Batas ini cuma jaring pengaman -- fix sebenarnya tetap rename manual ke
+# .bak lalu biarkan Chrome regenerate.
+$maxPatchBytes = 50MB
 
 function Log($m) {
   $line = "{0}  {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $m
@@ -97,10 +105,15 @@ try {
   foreach ($t in @('Profile 10','Profile 26','Profile 29','Profile 11')) {
     $pf = Join-Path $base "$t\Preferences"
     if (Test-Path $pf) {
-      $raw = Get-Content $pf -Raw
-      $new = $raw -replace '"exit_type"\s*:\s*"[^"]+"', '"exit_type":"Normal"'
-      $new = $new -replace '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true'
-      if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 }
+      $pfLen = (Get-Item -LiteralPath $pf).Length
+      if ($pfLen -gt $maxPatchBytes) {
+        Log ("  WARN {0}: Preferences {1}MB > batas {2}MB -- SKIP patch (dicurigai bloat)." -f $t, [math]::Round($pfLen/1MB), [math]::Round($maxPatchBytes/1MB))
+      } else {
+        $raw = Get-Content $pf -Raw
+        $new = $raw -replace '"exit_type"\s*:\s*"[^"]+"', '"exit_type":"Normal"'
+        $new = $new -replace '"exited_cleanly"\s*:\s*(true|false)', '"exited_cleanly":true'
+        if ($new -ne $raw) { Set-Content -Path $pf -Value $new -NoNewline -Encoding UTF8 }
+      }
     }
   }
   Log ("Chrome ditutup ({0} -> {1} proses), exit_type dipatch Normal." -f $procs.Count, (@(Get-Process chrome -ErrorAction SilentlyContinue)).Count)
