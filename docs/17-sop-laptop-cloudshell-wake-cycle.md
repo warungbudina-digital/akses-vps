@@ -1,5 +1,17 @@
 # 17 — SOP Siklus Wake↔Hibernasi Laptop SUARAHATI (Cloud Shell 3-profil)
 
+> ⛔ **PENSIUN TOTAL sejak 2026-08-31 — JANGAN dipakai sbg referensi jadwal
+> aktif.** Seluruh dokumen ini (RTC-wake 2-siklus, `wake-orchestrator.sh`,
+> task `NodeWake-0600`/`NodeBreak-1400`/`NodeWake2-1505`/`NodeHibernate-2300`)
+> digantikan arsitektur **boot-manual**: user nyalakan fisik → task laptop
+> `NodeBoot-TimeSync` → `NodeDaily-Launcher` → `NodeShutdown-14h` (shutdown
+> otomatis 14 jam pasca-boot). Referensi terkini: `laptop-scripts/README.md`
+> di repo ini. **`pre-hibernate-sop.sh` (§5) sudah DIHAPUS dari repo
+> (2026-10-16)** — cron-nya sudah `#DIJEDA#` sejak 30/8 dan tak pernah
+> dipakai lagi oleh arsitektur baru. Isi di bawah dibiarkan sebagai
+> riwayat/referensi teknis (banyak detail reusable utk pipeline sejenis),
+> BUKAN deskripsi sistem yang sedang jalan.
+
 > Dokumen ini ditulis SANGAT eksplisit (tabel, langkah bernomor, tanpa
 > istilah tersirat) supaya bisa diikuti bahkan oleh model AI yang lemah
 > atau operator yang baru pertama kali pegang sistem ini. Kalau ragu soal
