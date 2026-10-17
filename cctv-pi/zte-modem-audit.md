@@ -111,3 +111,12 @@ Dicoba 2 pendekatan buat tangkap nilai live via traffic capture, KEDUANYA GAGAL:
 - ✅ Login admin BERHASIL direplikasi via script (reusable utk automasi ke depan) — mekanismenya SHA256 challenge-response, bukan RSA.
 - ✅ Peta menu LENGKAP tersedia (semua kategori config: WAN/Firewall/DMZ/DDNS/WLAN/LAN/FTP/Samba/VoIP/Account).
 - ⚠️ Ekstraksi NILAI LIVE tiap setting (WiFi SSID/password asli, status DMZ, firewall level, daftar client) **BELUM tuntas** — endpoint `menuData` konsisten menolak dgn "SessionTimeout" meski title mekanisme login sendiri terbukti benar. Kalau perlu nilai-nilai ini scr pasti, opsi realistis: (a) baca langsung via browser manual sekali lalu screenshot, atau (b) lanjutkan reverse-engineering dgn traffic-capture (mitmproxy) drpd tebak-tebak parameter.
+
+## ✅ 2026-09-16 — WRITE config ZTE DIPECAHKAN + FTP DIMATIKAN (remediasi)
+**Wall "SessionTimeout" audit lama TERPECAHKAN.** Dua kunci yang dulu hilang:
+1. **Token menuData** = variabel `_sessionTmpToken` (string hex-escaped `\xNN` di inline-JS home), BUKAN `sess_token` login. WAJIB diambil dari halaman **`menuView` yg dimuat TEPAT sebelum** request menuData (urutan browser asli), lalu di-append `&_sessionTOKEN=<decoded>`. Token dari home page saja → tetap SessionTimeout.
+2. **Header integritas `Check`** (inilah kenapa POST balas HTTP 400 polos). `dataPost` (inline home JS) menambah header `Check = asyEncode(sha256(body))`; `asyEncode` = **RSA PKCS#1 v1.5 (JSEncrypt)** dgn public key ter-embed → base64. Tanpa header ini, POST ditolak di layer server (400), BUKAN ajax-error.
+
+**Resep write (terverifikasi):** `POST /?_type=menuData&_tag=<X>_lua.lua`, body `IF_ACTION=Apply&_InstID=<id>&<field=val>...&_sessionTOKEN=<tmptok>`, header `Check: base64(RSA_PKCS1v15(pubkey, sha256_hex(body)))`. Data balikan format `<ParaName>k</ParaName><ParaValue>v</ParaValue>`. Python: `cryptography` (`load_pem_public_key`+`padding.PKCS1v15`) cukup (ada di Pi). GET-with-IF_ACTION → balas SUCC tapi TAK mengubah (jebakan sukses-menyamar).
+
+**Remediasi FTP:** `Localnet_ftp_lua.lua` `_InstID=IGD` → set `FtpEnable=0&FtpAnon=0`. Sebelumnya 1/1 (FtpAnon=1 = akar "terima kredensial apa pun"). **Diverifikasi 3 jalur:** re-baca sesi-fresh (0/0 persisten), nmap `21/tcp closed`, curl FTP `Could not connect`. Resp write ERRORID -8 (warning objek FTP-user sekunder) tapi server-config berubah. Uplink Pi tak terganggu (disable FTP tak sentuh WiFi/WAN).
