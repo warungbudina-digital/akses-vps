@@ -22,9 +22,15 @@ Cloud Shell `.61` sama sekali — `social_trend.py` jalan murni dari hub.
 
 Baca `trend.social_post`+`trend.social_post_snapshot` (ditulis
 `social_trend.py`) → skor tertimbang 4-grup → zonasi 🟢🟡🔴 → tulis
-`trend.viral_score`. Top-K (default 10) dapat Tier-2: enqueue video ke
-analyzer `.50` (`viral-pipeline/orchestrator.py`, yang SUDAH mendukung
-youtube+instagram sejak awal) + Gemini via `ai_wiki_query` (RN7).
+`trend.viral_score`. Top-K (default **3**, REVISI 17/10 permintaan user
+"Top-3/hari" — dulu 10) dapat Tier-2: enqueue video ke analyzer `.50`
+(`viral-pipeline/orchestrator.py`, yang SUDAH mendukung youtube+instagram
+sejak awal) + Gemini via `ai_wiki_query` (RN7). Cap `top_k` cuma per-RUN
+(cron jalan 2x/hari) — cap HARIAN yg sebenarnya ditegakkan `_enqueue_today_
+gate()` di `viral_scorecard.py` (state `~/.local/state/scorecard/enqueued-
+today.json`), supaya ranking yg bergeser antar run tak dorong lebih dari 3
+video baru/hari. Video yg lolos Tier-2 (status `analyzed`) otomatis lanjut
+ke `orchestrator.py`'s `split_and_push_raw()` — lihat `../viral-pipeline/README.md`.
 
 ```bash
 python3 viral_scorecard.py --dry-run --no-llm   # cetak tabel, nol API call/DB write

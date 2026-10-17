@@ -161,11 +161,29 @@ butuh .60/laptop:
 Tabel: `trend.social_account_snapshot`, `trend.social_post`, `trend.social_post_snapshot`.
 Laporan memakai metrik ÷ pengikut (views/pengikut, (like+komentar)/pengikut) supaya
 akun raksasa tak otomatis menang, plus uji ajakan "komen …" di caption.
-`tiktok-trend-cron.sh` menjalankan IG/YT dulu (penanda harian sendiri), lalu TikTok;
-laporan Senin tetap terkirim di slot terakhir walau TikTok gagal.
+`social-trend-cron.sh` (bukan lagi `tiktok-trend-cron.sh` yang sudah dihapus) jalan
+11:10/14:10/17:10 WITA — 1x sukses/hari sudah cukup (penanda `last_ok_day`); laporan
+mingguan (Senin, via `social_trend_report.py --telegram`) jalan 1x/minggu di cron yang sama.
 
 ```bash
 python3 social_trend.py --check instagram akun1 akun2   # seleksi akun
 python3 social_trend.py --check youtube HandleChannel
 python3 social_trend.py --dry-run --only youtube
 ```
+
+### Durasi video (✅ 2026-10-17)
+
+Ditangkap tanpa butuh API/field baru. **Instagram**: gratis, dari param `efg=`
+(JSON base64 internal) di `media_url` yang sudah ikut diminta dari Business
+Discovery — carousel/image tetap `NULL` (wajar, bukan video). **YouTube**: satu-
+satunya sumber = scrape halaman watch (`"lengthSeconds"`, tak ada di RSS/oEmbed/
+about) — di-cache per video_id ke DB supaya video lama tak di-scrape ulang tiap
+cron. Dipakai `viral_scorecard.py` (G4 KecepatanEksekusi, dulu selalu `pending`).
+
+### Pengawas harian (✅ 2026-10-17): `social-trend-healthcheck.sh`
+
+Cron terpisah (`45 9 * * *`, bahasa laporan SENGAJA awam) yang mengecek 2 hal
+yang TAK tertangkap cron utama sendiri: (1) kesegaran data **per-platform**
+(exit-code `social-trend-cron.sh` digabung IG+YT — satu platform bisa total
+gagal berhari-hari tanpa ketahuan selama platform lain masih ok), (2) rasio akun
+sukses pada run terakhir. Alert Telegram hanya saat status berubah (anti-spam).
