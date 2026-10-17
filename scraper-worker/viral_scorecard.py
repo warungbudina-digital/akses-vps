@@ -27,9 +27,12 @@ beda dari TikTok):
   analyzer .50 (Tier-2, top-K)       : Hook · Pacing · Rewatch · Emosi (IR nyata, via enqueue)
   Gemini via ai_wiki_query (Tier-2)  : Relatabilitas · Universalitas
   heuristik                          : KecepatanEksekusi · BiayaVsHasil
-                                        [⚠️ s_speed butuh durasi video — IG/YT
-                                        belum menangkap field ini di social_trend.py,
-                                        jadi SELALU None/pending utk saat ini, bukan bug]
+                                        [✅ 2026-10-17: s_speed pakai duration_sec
+                                        yg sekarang ditangkap social_trend.py (IG
+                                        gratis via efg media_url; YT scrape watch-
+                                        page, di-cache per video_id). Pending kalau
+                                        durasi video itu masih NULL -- carousel/
+                                        image IG TAK PUNYA durasi (bukan bug).]
 
 Penyaringan bertingkat: Tier-1 objektif utk semua → ranking → hanya top-K (default 10)
 dapat Tier-2 (analyzer+Gemini). Dimensi yg belum ada = pending (NULL); total provisional
@@ -122,14 +125,15 @@ def q(v):
 def fetch_candidates(run_id: str | None):
     """Snapshot post TERBARU per (platform,post_id) dari trend.social_post(+snapshot)
     -- Instagram+YouTube, akun Go Go Bud sendiri (social_trend.py). Field `shares`/
-    `saves`/`duration_s` TAK ADA di schema ini (beda dari TikTok lama) -- lihat
-    score_video() utk bagaimana itu ditangani."""
+    `saves` TAK ADA di schema ini (beda dari TikTok lama) -- lihat score_video()
+    utk bagaimana itu ditangani. `duration_s` = alias duration_sec (✅ 17/10,
+    ditangkap social_trend.py; NULL utk carousel/image IG, bukan kegagalan)."""
     cond = "s.views IS NOT NULL AND s.views > 0"
     if run_id:
         cond = f"s.run_id = {q(run_id)} AND " + cond
     return db_json(f"""
       SELECT p.platform, p.post_id AS video_id, p.handle, p.caption AS description,
-             p.hashtags, p.url,
+             p.hashtags, p.url, p.duration_sec AS duration_s,
              s.views AS plays, s.likes, s.comments, s.run_id
       FROM trend.social_post p
       JOIN LATERAL (

@@ -7,6 +7,6 @@
     "like_rate_pct":    { "lo": 1.0, "hi": 10.0, "_": "-> Nilai Berbagi (G2). like-rate median niche ~1%, kuat ~10%+ (REVISI 16/10, IG/YT tak expose save/share-rate publik, lihat viral_scorecard.py docstring)" },
     "comment_rate_pct": { "lo": 0.05, "hi": 1.0 },
     "trend_ratio":      { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). views video / median views akun. >1 = di atas baseline" },
-    "duration_fast_s":  { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). TAK TERPAKAI saat ini -- social_trend.py belum menangkap durasi video IG/YT, s_speed selalu pending. Dibiarkan utk saat field itu ditambahkan." }
+    "duration_fast_s":  { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). AKTIF sejak 17/10 -- social_trend.py menangkap duration_sec (IG via efg media_url, YT via scrape watch-page). <=15s skor 5, >=90s skor 1, linear di antaranya." }
   }
 }
