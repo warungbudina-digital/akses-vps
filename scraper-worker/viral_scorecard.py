@@ -34,9 +34,11 @@ beda dari TikTok):
                                         durasi video itu masih NULL -- carousel/
                                         image IG TAK PUNYA durasi (bukan bug).]
 
-Penyaringan bertingkat: Tier-1 objektif utk semua → ranking → hanya top-K (default 10)
-dapat Tier-2 (analyzer+Gemini). Dimensi yg belum ada = pending (NULL); total provisional
-(bobot dinormalisasi ulang atas grup yg terisi) + complete=false.
+Penyaringan bertingkat: Tier-1 objektif utk semua → ranking → hanya top-K (default 3,
+REVISI 17/10 permintaan user "Top-3/hari") dapat Tier-2 (analyzer+Gemini). Cap harian
+DITEGAKKAN (bukan cuma per-run cron 2x/hari) via _enqueue_today_gate() -- lihat situ.
+Dimensi yg belum ada = pending (NULL); total provisional (bobot dinormalisasi ulang
+atas grup yg terisi) + complete=false.
 
 Pakai:
   python3 viral_scorecard.py                 # skor run scrape terbaru → tulis DB
@@ -197,6 +199,38 @@ def clamp15(v):
 ENQUEUE = os.environ.get("ENQUEUE_PY", str(HERE / "../viral-pipeline/enqueue.py"))
 ENQUEUE_ENABLED = True  # di-set main() (mati saat --dry-run/--no-enqueue)
 
+# (2026-10-17, permintaan user) Top-3/HARI: top_k di scorecard.config.json
+# cuma membatasi per-RUN (cron 2x/hari) -- tanpa gate terpisah ini, ranking yg
+# bergeser antar 2 run bisa dorong sampai 6 video BARU/hari, bukan 3. Video
+# yg SUDAH di-set hari ini boleh re-enqueue bebas (ON CONFLICT DO NOTHING di
+# enqueue.py, nol beban) -- cuma video BENAR-BENAR baru yg dihitung thd cap.
+ENQUEUE_DAY_CAP = 3
+ENQUEUE_DAY_STATE = Path.home() / ".local/state/scorecard/enqueued-today.json"
+
+
+def _enqueue_today_gate(eid: str) -> bool:
+    """True = boleh enqueue eid sekarang (di bawah cap harian WITA)."""
+    if not eid:
+        return True  # external_id kosong -> tak bisa dilacak, jangan blokir
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 8 * 3600))  # WITA = UTC+8
+    try:
+        st = json.loads(ENQUEUE_DAY_STATE.read_text())
+    except Exception:
+        st = {}
+    if st.get("date") != today:
+        st = {"date": today, "ids": []}
+    if eid in st["ids"]:
+        return True
+    if len(st["ids"]) >= ENQUEUE_DAY_CAP:
+        return False
+    st["ids"].append(eid)
+    try:
+        ENQUEUE_DAY_STATE.parent.mkdir(parents=True, exist_ok=True)
+        ENQUEUE_DAY_STATE.write_text(json.dumps(st))
+    except Exception:
+        pass  # best-effort -- gagal tulis state TAK BOLEH gagalkan scoring
+    return True
+
 HOOK_MAP = {"strong_hook": 5.0, "medium_hook": 3.5, "weak_hook": 2.0, "no_hook": 1.0, "none": 1.0}
 EMO_NEUTRAL = {"neutral face", "unknown", "no face", ""}
 
@@ -277,7 +311,7 @@ def analyzer_ir(platform: str, url: str):
     ir = _fetch_ir(platform, eid)
     if ir:
         return map_ir_to_dims(ir)
-    if ENQUEUE_ENABLED:
+    if ENQUEUE_ENABLED and _enqueue_today_gate(eid):
         try:
             subprocess.run(["python3", ENQUEUE, "viral_video", url],
                            capture_output=True, text=True, timeout=30)  # idempoten (ON CONFLICT)

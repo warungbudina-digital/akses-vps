@@ -2,7 +2,8 @@
   "_catatan": "Bobot & ambang Viral Scorecard. Bobot grup default 0.30/0.30/0.20/0.20 (bisa disetel). Ambang = titik kalibrasi pemetaan metrik objektif -> skala 1..5 (linear di-clamp).",
   "weights": { "g1": 0.30, "g2": 0.30, "g3": 0.20, "g4": 0.20 },
   "zones": { "green": 4.2, "yellow": 3.0 },
-  "top_k": 10,
+  "top_k": 3,
+  "_top_k": "REVISI 17/10 (permintaan user): Top-3/HARI, bukan /run -- cron scorecard-cron.sh jalan 2x/hari, jadi top_k ini membatasi TIER-2 per-RUN; cap harian (3 video BARU, lintas kedua run) ditegakkan terpisah via _enqueue_today_gate() di viral_scorecard.py.",
   "thresholds": {
     "like_rate_pct":    { "lo": 1.0, "hi": 10.0, "_": "-> Nilai Berbagi (G2). like-rate median niche ~1%, kuat ~10%+ (REVISI 16/10, IG/YT tak expose save/share-rate publik, lihat viral_scorecard.py docstring)" },
     "comment_rate_pct": { "lo": 0.05, "hi": 1.0 },
