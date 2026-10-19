@@ -5,14 +5,24 @@ Kuras antrean `media.video_ingest` (DB-VPS). Per job:
   claim (FOR UPDATE SKIP LOCKED) -> download di DB-VPS (yt-dlp, cookies per platform)
   -> stream video DB-VPS->.50 via pipe (TAK mendarat di disk akses-vps)
   -> POST /analyze di .50 -> tulis media.video_analysis (+category, JSON dollar-quote)
-  -> status 'analyzed' -> hapus video 2 sisi.
+  -> status 'analyzed' -> [best-effort: reproduksi VN + footage stok + RAW
+  footage Gdrive, lihat split_and_push_raw()] -> hapus video 2 sisi.
 Gagal di langkah mana pun -> status 'pending' (retry) / 'dead' (habis) + last_error.
+
+(2026-10-17) Sejak job 'analyzed': video sumber (TANPA audio) + audio-only +
+1 thumbnail ditarik balik DB-VPS->hub & di-push ke Gdrive gfootage:
+raw-footage/<judul [url]>/{video.mkv,audio.mka,thumbnail.jpg} -- SATU folder
+per job (konsolidasi 2026-10-19, permintaan user; semula 3 folder flat
+terpisah) -- lihat split_and_push_raw(). Ini kolam bahan MENTAH hasil
+analisa, BEDA dari gfootage:RAW-VIDEO/ (stok Pexels/Pixabay, Jalur C)
+dan gfootage:VN-exports/ (hasil edit SIAP-PUBLISH, dipakai premiere_pipeline.py).
+Link folder ditulis balik ke media.video_ingest.raw_footage_folder.
 
 Prasyarat runtime: user aktifkan .50 + analyzer healthy (bring-up-analyzer.sh);
 DB-VPS reachable; cookies+yt-dlp+deno di DB-VPS ~/viral-pipeline/.
 Env: MAX_JOBS=N (0=kuras semua, default 0).
 """
-import subprocess, json, sys, os, shlex
+import subprocess, json, sys, os, shlex, re
 
 DBVPS       = "db-vps"                    # host alias ssh (akses-vps -> DB-VPS)
 C50_SOCK    = "/tmp/c50.sock"
@@ -44,6 +54,18 @@ FOOTAGE_TIMEOUT  = int(os.getenv("FOOTAGE_TIMEOUT", "600"))  # detik/skrip; jari
 # reuse helper yg sama (send-telegram.sh, no-op anggun kalau kredensial
 # belum diisi -- lihat isi skrip itu).
 TELEGRAM_SCRIPT = os.path.expanduser("~/akses-vps/backup/send-telegram.sh")
+# (2026-10-17) permintaan user: simpan bahan MENTAH sumber Tier-2 (video TANPA
+# audio + audio-only + 1 thumbnail) ke Gdrive gfootage: -- TERPISAH dari
+# RAW-VIDEO (stok Pexels/Pixabay, Jalur C lama) dan VN-exports (hasil edit
+# SIAP-PUBLISH) -- supaya "bahan mentah hasil analisa" tak tercampur dgn
+# "video siap publish". Proses jalan LOKAL di hub (bukan DB-VPS/.50 --
+# keduanya nol ffmpeg+kredensial gfootage, lihat audit 17/10), pola sama
+# persis fetch_and_push_footage() (tarik->proses->push->best-effort).
+# (2026-10-19) permintaan user: konsolidasi -- SATU folder per job (video+
+# audio+thumb bersama di dalamnya), semula 3 folder flat terpisah per jenis.
+GFOOTAGE_ROOT = "gfootage:raw-footage/"
+RAW_WORKDIR = os.path.expanduser("~/viral-pipeline/raw-work")
+RAW_MIN_DISK_MB = 500  # lindungi disk hub (pernah 93% penuh, lihat social-trend-cron.sh)
 
 def sh(args, inp=None, timeout=None):
     return subprocess.run(args, input=inp, capture_output=True, text=True, timeout=timeout)
@@ -146,15 +168,35 @@ def download(job):
     if not cookie:
         return None, f"platform tak didukung: {job['platform']}"
     jid, url = job["id"], job["url"]
+    # --write-info-json (2026-10-17): sidecar job-<id>.info.json berisi 'title'
+    # asli -- dipakai nama file raw-footage Gdrive (fetch_title()). Filter file
+    # hasil WAJIB buang .info.json juga (bukan cuma .log), krn urut alfabet
+    # ".info.json" < ".mp4" -- tanpa itu `head -1` salah ambil sidecar JSON,
+    # bukan video, sbg "path video".
     cmd = (f"cd {DBVPS_TOOLS} && mkdir -p work && rm -f work/job-{jid}.* && "
-           f'PATH="$PWD:$PATH" ./yt-dlp --cookies {cookie} --no-playlist '
+           f'PATH="$PWD:$PATH" ./yt-dlp --cookies {cookie} --no-playlist --write-info-json '
            f"-o 'work/job-{jid}.%(ext)s' {shlex.quote(url)} >work/job-{jid}.log 2>&1 && "
-           f"ls work/job-{jid}.* | grep -v '\\.log$' | head -1")
+           f"ls work/job-{jid}.* | grep -v '\\.log$' | grep -v '\\.info\\.json$' | head -1")
     r = ssh_db(cmd, timeout=600)
     if r.returncode != 0 or not r.stdout.strip():
         tail = ssh_db(f"tail -3 {DBVPS_WORK}/job-{jid}.log 2>/dev/null").stdout.strip()
         return None, f"download gagal: {tail[:400]}"
     return r.stdout.strip().splitlines()[-1], None   # path relatif (work/job-<id>.ext)
+
+
+def fetch_title(job, dbvps_relpath):
+    """Judul asli video (sidecar .info.json yg ditulis yt-dlp di download()) --
+    utk nama file raw-footage Gdrive. Best-effort PENUH: gagal baca/parse ->
+    string kosong (safe_name() punya fallback 'untitled'), TAK PERNAH
+    menggagalkan job -- judul cuma kosmetik nama file, bukan data kritis."""
+    info_path = re.sub(r"\.[^.]+$", ".info.json", dbvps_relpath)
+    try:
+        r = ssh_db(f"cd {DBVPS_TOOLS} && cat {shlex.quote(info_path)} 2>/dev/null", timeout=15)
+        if r.returncode == 0 and r.stdout.strip():
+            return json.loads(r.stdout).get("title") or ""
+    except Exception:
+        pass
+    return ""
 
 def stream_to_c50(job, dbvps_relpath):
     jid = job["id"]
@@ -268,6 +310,128 @@ def fetch_and_push_footage(job, outdir):
     else:
         log(f"  footage -> gfootage:RAW-VIDEO/job-{jid}/ :", _last_line(r)[:150])
 
+def disk_avail_mb(path="/"):
+    try:
+        st = os.statvfs(path)
+        return st.f_bavail * st.f_frsize // (1024 * 1024)
+    except Exception:
+        return 0
+
+
+def safe_name(title, url):
+    """'<judul> [<url-lengkap>]' jadi SATU nama file flat. URL mentah punya
+    '/' yg akan disalahartikan rclone sbg pemisah folder kalau tak disanitasi
+    -- diganti '_'. Judul dibersihkan dr karakter terlarang filesystem supaya
+    aman kalau nanti disalin keluar Gdrive (mis. backup ke SSD lokal)."""
+    t = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", (title or "")).strip()
+    t = re.sub(r"\s+", " ", t)[:120] or "untitled"
+    u = re.sub(r"^https?://", "", url or "").rstrip("/")
+    u = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", u)[:150]
+    return f"{t} [{u}]"
+
+
+def pull_from_dbvps(remote_relpath, local_path, timeout=300):
+    """Tarik SATU file biner DB-VPS -> hub (beda dr stream_to_c50 yg pipe ke
+    .50): sengaja mendarat di disk hub sebentar krn ffmpeg+rclone+kredensial
+    gfootage: cuma ada di sini (lihat audit 17/10 -- DB-VPS/.50 nol keduanya)."""
+    try:
+        with open(local_path, "wb") as f:
+            r = subprocess.run(["ssh", DBVPS, f"cd {DBVPS_TOOLS} && cat {shlex.quote(remote_relpath)}"],
+                               stdout=f, stderr=subprocess.PIPE, timeout=timeout)
+        return r.returncode == 0, (r.stderr or b"").decode(errors="replace").strip()[:300]
+    except Exception as e:
+        return False, repr(e)[:300]
+
+
+def ffmpeg_run(args, timeout=180):
+    try:
+        r = subprocess.run(["ffmpeg", "-y", "-v", "error"] + args, capture_output=True, text=True, timeout=timeout)
+        return r.returncode == 0, (r.stderr or "").strip()[:300]
+    except Exception as e:
+        return False, repr(e)[:300]
+
+
+def rclone_push(local_path, remote_dir, remote_name, timeout=180):
+    try:
+        r = subprocess.run(["rclone", "copyto", local_path, remote_dir + remote_name],
+                           capture_output=True, text=True, timeout=timeout)
+        return r.returncode == 0, (r.stderr or r.stdout).strip()[:300]
+    except Exception as e:
+        return False, repr(e)[:300]
+
+
+def split_and_push_raw(job, dbvps_relpath, title):
+    """(2026-10-17, permintaan user) video TANPA audio (-c:v copy, nol re-
+    encode -- 'raw' = codec asli dipertahankan) -> MKV, audio-only (-c:a copy)
+    -> MKA (kontainer Matroska dipilih krn fleksibel: nampung codec apa pun
+    [h264/vp9/aac/opus/...] tanpa transcode, beda dr memaksa .mp4/.m4a yg bisa
+    gagal mux utk source tertentu), + 1 thumbnail representatif (filter
+    `thumbnail`, bukan frame fixed -- hindari frame hitam/transisi) -> JPG.
+    Ketiganya masuk SATU folder Gdrive bernama '<judul> [<url>]/' (konsolidasi
+    2026-10-19), isi: video.mkv + audio.mka + thumbnail.jpg. Link folder itu
+    ditulis balik ke media.video_ingest.raw_footage_folder bila minimal 1
+    aset sukses ter-upload.
+    Best-effort PENUH (pola sama build_reproduction()/fetch_and_push_footage()):
+    job SUDAH 'analyzed' sebelum dipanggil, kegagalan di SINI (ffmpeg/rclone/
+    disk penuh/exception apa pun) TAK PERNAH menggagalkan job -- fungsi ini
+    TAK PERNAH raise ke pemanggil."""
+    jid = job["id"]
+    # didefinisikan DULUAN (bukan di tengah try) supaya finally selalu punya
+    # 4 nama path yg konsisten utk dibersihkan, apa pun titik return/exception
+    # di bawah -- tanpa ini, cleanup jadi rawan NameError/path salah.
+    ext = os.path.splitext(dbvps_relpath)[1] or ".mp4"
+    src = os.path.join(RAW_WORKDIR, f"job-{jid}{ext}")
+    out_v = os.path.join(RAW_WORKDIR, f"job-{jid}.video.mkv")
+    out_a = os.path.join(RAW_WORKDIR, f"job-{jid}.audio.mka")
+    out_t = os.path.join(RAW_WORKDIR, f"job-{jid}.thumb.jpg")
+    try:
+        if disk_avail_mb() < RAW_MIN_DISK_MB:
+            log(f"  (raw-footage: disk hub <{RAW_MIN_DISK_MB}MB, dilewati)")
+            return
+        os.makedirs(RAW_WORKDIR, exist_ok=True)
+        name = safe_name(title, job.get("url"))
+
+        ok, err = pull_from_dbvps(dbvps_relpath, src)
+        if not ok:
+            log("  (raw-footage: tarik file dr DB-VPS gagal):", err)
+            return
+
+        folder = GFOOTAGE_ROOT + name + "/"
+        pushed = []
+        for key, args, out, fname in (
+            ("video", ["-i", src, "-an", "-c:v", "copy", out_v], out_v, "video.mkv"),
+            ("audio", ["-i", src, "-vn", "-c:a", "copy", out_a], out_a, "audio.mka"),
+            ("thumb", ["-i", src, "-vf", "thumbnail", "-frames:v", "1", out_t], out_t, "thumbnail.jpg"),
+        ):
+            ok, err = ffmpeg_run(args)
+            if not ok:
+                log(f"  (raw-footage: ffmpeg {key} gagal):", err)
+                continue
+            ok, err = rclone_push(out, folder, fname)
+            if ok:
+                pushed.append(key)
+            else:
+                log(f"  (raw-footage: push {key} gagal):", err)
+
+        if pushed:
+            f_esc = folder.replace("'", "''")
+            r = psql(f"UPDATE media.video_ingest SET raw_footage_folder='{f_esc}' WHERE id={jid};")
+            if r.returncode != 0:
+                log("  (raw-footage: gagal tulis balik raw_footage_folder):", r.stderr.strip()[:200])
+
+        log(f"  raw-footage: {len(pushed)}/3 ter-upload ({','.join(pushed) or '-'}) -> {folder}")
+    except Exception as e:
+        log("  (raw-footage: exception, dilewati):", repr(e)[:200])
+    finally:
+        for p in (src, out_v, out_a, out_t):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                log(f"  (raw-footage: gagal hapus temp {p}):", repr(e)[:100])
+
+
 def cleanup(jid):
     ssh_db(f"rm -f {DBVPS_WORK}/job-{jid}.*")
     ssh_c50(f"rm -f {C50_INPUT}/job-{jid}.*")
@@ -286,6 +450,7 @@ def main():
             if err:
                 log("  x download:", err); fail_job(job, err); fail += 1; continue
             log("  downloaded:", relpath)
+            title = fetch_title(job, relpath)   # best-effort, boleh kosong ("")
             cpath, err = stream_to_c50(job, relpath)
             if err:
                 log("  x stream:", err); fail_job(job, err); cleanup(job["id"]); fail += 1; continue
@@ -298,6 +463,7 @@ def main():
             outdir = build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
             if outdir:
                 fetch_and_push_footage(job, outdir)              # best-effort, tak pernah gagalkan job
+            split_and_push_raw(job, relpath, title)              # best-effort, tak pernah gagalkan job
             cleanup(job["id"])
             ok += 1
             sc = len(data["analysis"].get("scene_analysis", []))

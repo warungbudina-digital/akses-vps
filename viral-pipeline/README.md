@@ -32,6 +32,9 @@ Cloud Shell **tak bisa** menghubungi Postgres DB-VPS langsung (`pg_hba` tak meng
 | `schema-queue.sql` | DB-VPS | DDL antrean + kolom `category` pada hasil. **Sudah diterapkan** — berisi `DROP TABLE`, jangan dijalankan ulang pada antrean hidup. |
 | `validate-queue.sql` | DB-VPS | Uji perilaku antrean (dedup, dua claim paralel, cleanup). Aman: membersihkan seed-nya sendiri. |
 | `bring-up-analyzer.sh` | .50 | Siapkan analyzer di VM fresh (clone + build + up), idempoten. `v1` (ringan) / `v2` (whisper+CLIP). |
+| `pexels_fetch.py` / `pixabay_fetch.py` | akses-vps | (Jalur C, 2026-08-29) sumber footage stok MENTAH per babak dari blueprint IR — dipanggil `orchestrator.py` best-effort stlh job `analyzed`. |
+| `push_raw_footage.py` | akses-vps | Push klip stok hasil fetch di atas → `gfootage:RAW-VIDEO/job-<id>/` (BEDA dari raw-footage §bawah — ini stok Pexels/Pixabay, bukan video sumber yg dianalisa). |
+| `dashboard_api.py` | akses-vps (systemd `viral-dashboard-api`) | (2026-10-19) Backend form input URL web, dipanggil `input.html` (nginx `pipeline.obc-crypto.com/input.html`). `POST /api/enqueue` → insert `media.video_ingest` (reuse `enqueue.py`), auth Bearer token (`~/.config/viral-dashboard/credentials.env`). Bind `172.19.0.1:8097` (gateway docker, nginx jalan di container). Install/aktifkan: `install-dashboard-api.sh`. |
 
 Repo ini adalah **sumber kebenaran**; `~/viral-pipeline` di akses-vps adalah symlink ke sini.
 Salinan di node lain (DB-VPS, .50) adalah salinan-jalan — sinkronkan dari sini, jangan sebaliknya.
@@ -101,6 +104,33 @@ Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = 
 Detail selector VN + jebakan otomasi Appium: lihat memori `project_viral_analyzer` /
 `project_infinix_streaming_setup` + repo `tool-appium/docs/vn-automation-map.md`.
 
+## Raw-footage ke Gdrive (✅ 2026-10-17, permintaan user)
+
+Setiap job yang sukses `analyzed` otomatis lanjut (best-effort, kegagalan di
+sini TAK PERNAH menggagalkan job) ke `split_and_push_raw()` di
+`orchestrator.py`: tarik video sumber balik DB-VPS→akses-vps (satu-satunya
+node dgn ffmpeg+rclone+kredensial gfootage sekaligus), pisah **video TANPA
+audio** (`-an -c:v copy`, nol transcode) + **audio-only** (`-vn -c:a copy`)
+via kontainer **Matroska** (`.mkv`/`.mka` — nampung codec apa pun [h264/vp9/
+aac/opus/…] tanpa transcode, genuinely "raw"), + **1 thumbnail** representatif
+(filter `thumbnail`, bukan frame fixed). Push ke Gdrive `maydualapan8@gmail.com`
+(remote rclone `gfootage:`), **3 folder BARU, sengaja terpisah** dari folder lama:
+
+| Folder Gdrive | Isi |
+|---|---|
+| `raw-video-footage/` | Video sumber Tier-2, tanpa audio |
+| `raw-audio-footage/` | Audio sumber Tier-2, tanpa video |
+| `raw-thumbnail/` | 1 frame representatif |
+| `RAW-VIDEO/job-<id>/` *(lama)* | Stok Pexels/Pixabay — Jalur C, BEDA sumber |
+| `VN-exports/` *(lama)* | Hasil EDIT siap-publish (`premiere_pipeline.py`) |
+
+Nama file = **judul asli video + URL sumber lengkap** (`<judul> [<url>]`,
+disanitasi flat), sama utk ketiganya — judul dari sidecar `work/job-<id>.
+info.json` (`yt-dlp --write-info-json`, baru ditambah ke `download()`).
+Disk-guard `RAW_MIN_DISK_MB=500` (hub pernah 93% penuh) + cleanup temp lokal
+di `finally`, apa pun hasilnya. **Diuji live end-to-end** (bukan dry-run):
+job nyata #153, lihat `project_viral_analyzer.md` di memori.
+
 ## Status analisa
 
 Teruji end-to-end: reel Instagram (bpm 117.45) + reel Facebook long-form (12:16, 234 scene,
@@ -115,4 +145,4 @@ Hulu `browser_enqueue.py` teruji (scrape IG → guard exit 4 karena login-wall; 
 - **`~` di `shlex.quote()` tak di-expand**. Pola benar: `cd ~/dir && cat relpath`.
 - **Analyze whisper video panjang bisa >5mnt** → timeout hardcoded 300s dulu bikin `TimeoutExpired` tak tertangkap → crash + job tersangkut `processing`. Fix: `ANALYZE_TIMEOUT` 1200s + per-job try/except.
 - **Otomasi VN via Appium**: tombol Lynx (mis. "Menggunakan") TAK kena `adb tap`/coordinate-tap saat interleaving ui-map → pakai **satu sesi Appium** berurutan. Item RecyclerView DocumentsUI perlu **Appium `.click()`** (bukan adb tap). Playhead time terbaca sbg node `current_textView` (buat seek feedback-loop). BACK di editor VN = keluar+autosave.
-- **Disk**: DB-VPS ~24GB bebas; **.50 ephemeral ketat** (v2 image 5.86GB, sisa ~3.6GB). Video di-stream lewat pipe supaya tak mendarat di disk akses-vps, dihapus 2 sisi pasca-analisa. (akses-vps sendiri kini lega ~54% pasca reboot 2026-08-03.)
+- **Disk**: DB-VPS ~24GB bebas; **.50 ephemeral ketat** (v2 image 5.86GB, sisa ~3.6GB). Video di-stream lewat pipe ke `.50` (TAK mendarat di disk akses-vps utk jalur analisa), dihapus 2 sisi pasca-analisa. ⚠️ **TERKECUALI**: `split_and_push_raw()` (§Raw-footage di atas, 2026-10-17) SENGAJA menarik 1 copy ke disk akses-vps sebentar (ffmpeg+rclone cuma ada di sini) — disk-guard 500MB + cleanup `finally` menjaga ini tak menumpuk.

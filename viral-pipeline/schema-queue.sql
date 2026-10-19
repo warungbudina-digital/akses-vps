@@ -46,3 +46,13 @@ ALTER TABLE media.video_analysis
     ADD COLUMN IF NOT EXISTS category text
         CHECK (category IN ('viral_video','menuju_viral_video'));
 CREATE INDEX IF NOT EXISTS ix_video_analysis_category ON media.video_analysis (category);
+
+-- ---------- KURASI PRIBADI + mirror Sheet via n8n (2026-10-19) ----------
+-- Kolom scoring manual (diisi user, dibaca/ditulis n8n saat sync ke/dari
+-- Google Sheet) + link folder Gdrive raw-footage hasil split_and_push_raw().
+ALTER TABLE media.video_ingest
+    ADD COLUMN IF NOT EXISTS user_score int CHECK (user_score BETWEEN 1 AND 10),
+    ADD COLUMN IF NOT EXISTS user_notes text,
+    ADD COLUMN IF NOT EXISTS decision text CHECK (decision IN ('pilih','tunda','skip')),
+    ADD COLUMN IF NOT EXISTS used_in_rn7 boolean NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS raw_footage_folder text;
