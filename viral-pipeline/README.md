@@ -104,29 +104,33 @@ Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = 
 Detail selector VN + jebakan otomasi Appium: lihat memori `project_viral_analyzer` /
 `project_infinix_streaming_setup` + repo `tool-appium/docs/vn-automation-map.md`.
 
-## Raw-footage ke Gdrive (✅ 2026-10-17, permintaan user)
+## Raw-footage ke Gdrive (✅ 2026-10-17, revisi 19/10 + 21/10, permintaan user)
 
 Setiap job yang sukses `analyzed` otomatis lanjut (best-effort, kegagalan di
 sini TAK PERNAH menggagalkan job) ke `split_and_push_raw()` di
 `orchestrator.py`: tarik video sumber balik DB-VPS→akses-vps (satu-satunya
 node dgn ffmpeg+rclone+kredensial gfootage sekaligus), pisah **video TANPA
-audio** (`-an -c:v copy`, nol transcode) + **audio-only** (`-vn -c:a copy`)
-via kontainer **Matroska** (`.mkv`/`.mka` — nampung codec apa pun [h264/vp9/
-aac/opus/…] tanpa transcode, genuinely "raw"), + **1 thumbnail** representatif
+audio** (`-an -c:v copy`, nol transcode, tetap kontainer MKV — codec asli
+dipertahankan) + **audio-only** (`-vn -c:a pcm_s16le` → **WAV**, revisi 21/10:
+semula stream-copy ke `.mka`/Matroska, diganti PCM supaya tak perlu
+demux-kontainer/decode-codec-kompresi apa pun → lebih andal terbaca user
+maupun tool AI lemah seperti transkripsi/analisa suara; sample rate+channel
+asli dipertahankan, cuma codec yang berubah) + **1 thumbnail** representatif
 (filter `thumbnail`, bukan frame fixed). Push ke Gdrive `maydualapan8@gmail.com`
-(remote rclone `gfootage:`), **3 folder BARU, sengaja terpisah** dari folder lama:
+(remote rclone `gfootage:`).
+
+**SATU folder per job** (konsolidasi 19/10, semula 3 folder flat terpisah):
 
 | Folder Gdrive | Isi |
 |---|---|
-| `raw-video-footage/` | Video sumber Tier-2, tanpa audio |
-| `raw-audio-footage/` | Audio sumber Tier-2, tanpa video |
-| `raw-thumbnail/` | 1 frame representatif |
-| `RAW-VIDEO/job-<id>/` *(lama)* | Stok Pexels/Pixabay — Jalur C, BEDA sumber |
-| `VN-exports/` *(lama)* | Hasil EDIT siap-publish (`premiere_pipeline.py`) |
+| `raw-footage/<judul> [<url>]/` | `video.mkv` + `audio.wav` + `thumbnail.jpg` |
+| `RAW-VIDEO/job-<id>/` *(beda pipeline)* | Stok Pexels/Pixabay — Jalur C, BEDA sumber |
+| `VN-exports/` *(beda pipeline)* | Hasil EDIT siap-publish (`premiere_pipeline.py`) |
 
-Nama file = **judul asli video + URL sumber lengkap** (`<judul> [<url>]`,
-disanitasi flat), sama utk ketiganya — judul dari sidecar `work/job-<id>.
-info.json` (`yt-dlp --write-info-json`, baru ditambah ke `download()`).
+Nama folder = **judul asli video + URL sumber lengkap** (`<judul> [<url>]`,
+disanitasi flat) — judul dari sidecar `work/job-<id>.info.json` (`yt-dlp
+--write-info-json`, ditambah ke `download()`). Link folder ditulis balik ke
+`media.video_ingest.raw_footage_folder` bila minimal 1 aset sukses ter-upload.
 Disk-guard `RAW_MIN_DISK_MB=500` (hub pernah 93% penuh) + cleanup temp lokal
 di `finally`, apa pun hasilnya. **Diuji live end-to-end** (bukan dry-run):
 job nyata #153, lihat `project_viral_analyzer.md` di memori.

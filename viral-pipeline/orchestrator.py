@@ -11,7 +11,7 @@ Gagal di langkah mana pun -> status 'pending' (retry) / 'dead' (habis) + last_er
 
 (2026-10-17) Sejak job 'analyzed': video sumber (TANPA audio) + audio-only +
 1 thumbnail ditarik balik DB-VPS->hub & di-push ke Gdrive gfootage:
-raw-footage/<judul [url]>/{video.mkv,audio.mka,thumbnail.jpg} -- SATU folder
+raw-footage/<judul [url]>/{video.mkv,audio.wav,thumbnail.jpg} -- SATU folder
 per job (konsolidasi 2026-10-19, permintaan user; semula 3 folder flat
 terpisah) -- lihat split_and_push_raw(). Ini kolam bahan MENTAH hasil
 analisa, BEDA dari gfootage:RAW-VIDEO/ (stok Pexels/Pixabay, Jalur C)
@@ -362,13 +362,16 @@ def rclone_push(local_path, remote_dir, remote_name, timeout=180):
 
 def split_and_push_raw(job, dbvps_relpath, title):
     """(2026-10-17, permintaan user) video TANPA audio (-c:v copy, nol re-
-    encode -- 'raw' = codec asli dipertahankan) -> MKV, audio-only (-c:a copy)
-    -> MKA (kontainer Matroska dipilih krn fleksibel: nampung codec apa pun
-    [h264/vp9/aac/opus/...] tanpa transcode, beda dr memaksa .mp4/.m4a yg bisa
-    gagal mux utk source tertentu), + 1 thumbnail representatif (filter
-    `thumbnail`, bukan frame fixed -- hindari frame hitam/transisi) -> JPG.
+    encode -- 'raw' = codec asli dipertahankan) -> MKV, audio-only -> WAV
+    (2026-10-21: diubah dari MKA/stream-copy KE PCM 16-bit `pcm_s16le`
+    -- permintaan user: WAV TAK butuh demux kontainer/decode codec kompresi
+    apa pun, jadi lebih andal terbaca oleh user maupun tool AI lemah
+    [transkripsi/analisa suara] drpd Opus/AAC di-dalam-Matroska; sample
+    rate+channel asli DIPERTAHANKAN, cuma codec yg berubah -- bukan downsample
+    sengaja), + 1 thumbnail representatif (filter `thumbnail`, bukan frame
+    fixed -- hindari frame hitam/transisi) -> JPG.
     Ketiganya masuk SATU folder Gdrive bernama '<judul> [<url>]/' (konsolidasi
-    2026-10-19), isi: video.mkv + audio.mka + thumbnail.jpg. Link folder itu
+    2026-10-19), isi: video.mkv + audio.wav + thumbnail.jpg. Link folder itu
     ditulis balik ke media.video_ingest.raw_footage_folder bila minimal 1
     aset sukses ter-upload.
     Best-effort PENUH (pola sama build_reproduction()/fetch_and_push_footage()):
@@ -382,7 +385,7 @@ def split_and_push_raw(job, dbvps_relpath, title):
     ext = os.path.splitext(dbvps_relpath)[1] or ".mp4"
     src = os.path.join(RAW_WORKDIR, f"job-{jid}{ext}")
     out_v = os.path.join(RAW_WORKDIR, f"job-{jid}.video.mkv")
-    out_a = os.path.join(RAW_WORKDIR, f"job-{jid}.audio.mka")
+    out_a = os.path.join(RAW_WORKDIR, f"job-{jid}.audio.wav")
     out_t = os.path.join(RAW_WORKDIR, f"job-{jid}.thumb.jpg")
     try:
         if disk_avail_mb() < RAW_MIN_DISK_MB:
@@ -400,7 +403,7 @@ def split_and_push_raw(job, dbvps_relpath, title):
         pushed = []
         for key, args, out, fname in (
             ("video", ["-i", src, "-an", "-c:v", "copy", out_v], out_v, "video.mkv"),
-            ("audio", ["-i", src, "-vn", "-c:a", "copy", out_a], out_a, "audio.mka"),
+            ("audio", ["-i", src, "-vn", "-c:a", "pcm_s16le", out_a], out_a, "audio.wav"),
             ("thumb", ["-i", src, "-vf", "thumbnail", "-frames:v", "1", out_t], out_t, "thumbnail.jpg"),
         ):
             ok, err = ffmpeg_run(args)
