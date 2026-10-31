@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 push_raw_footage.py — kirim klip stok yg sudah diunduh (pexels_fetch.py /
-pixabay_fetch.py) ke RN7 (adb push, via container tool-appium) sbg RAW
+pixabay_fetch.py) ke RN7 (`adb shell cat > file` via stdin, via container
+tool-appium -- BUKAN literal `adb push`, lihat catatan di adb_push()) sbg RAW
 FOOTAGE, siap diedit manual bebas (Jalur C, lihat memori
 project_viral_analyzer.md "2026-08-29").
 
@@ -15,7 +16,8 @@ TERBUKTI tak jalan dari sini, lihat audit 31/10).
 
 Baca satu/lebih `<base>.pexels-plan.json` / `<base>.pixabay-plan.json`
 (TERBUKA utk keduanya sekaligus dlm satu job) -> tiap fase berstatus
-downloaded/cached (punya local_path nyata di disk) -> `adb push` ke
+downloaded/cached (punya local_path nyata di disk) -> stream (adb shell
+`cat > file`, lihat adb_push()) ke
 `/sdcard/Movies/Seal/<job-id>_<fname>` (prefix job-id krn folder Seal FLAT,
 bukan per-job spt RAW-VIDEO dulu -- cegah filename kolisi lintas job) ->
 tulis balik field `rn7_path` ke plan JSON yg sama (dulu `gdrive_path`,
@@ -46,6 +48,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -98,11 +101,24 @@ def resolve_udid(container, rn7_ip):
 
 
 def adb_push(container, udid, local, remote, dry_run, timeout=300):
+    """(2026-10-31, fix bug nyata saat migrasi RAW-VIDEO->RN7) `adb push
+    <local> <remote>` TAK BISA dipakai lewat `docker exec` -- adb client
+    jalan DI DALAM container, yg filesystem-nya terisolasi dari host (cuma
+    3 bind-mount spesifik, lihat `docker inspect tool-appium-appium-1`),
+    jadi path lokal di HOST (hasil rclone copyto) selalu "No such file or
+    directory" dari sudut pandang container -- 111/111 gagal saat ditemukan
+    (log migrate-rawvideo.log). Fix: stream via stdin -- `adb shell "cat >
+    dest"` dgn stdin PROSES (bukan path) diarahkan ke file lokal; redirect
+    `< local` terjadi di shell HOST SEBELUM docker exec, jadi `docker exec -i`
+    cuma meneruskan byte stream, tak pernah perlu lihat path host. Binary-
+    safe -- diverifikasi checksum sha256 identik pull<->push."""
     if dry_run:
         return 0, f"(dry-run) {local} -> {remote}"
     try:
-        r = subprocess.run(["docker", "exec", container, "adb", "-s", udid, "push", local, remote],
-                            capture_output=True, text=True, timeout=timeout)
+        with open(local, "rb") as f:
+            r = subprocess.run(
+                ["docker", "exec", "-i", container, "adb", "-s", udid, "shell", f"cat > {shlex.quote(remote)}"],
+                stdin=f, capture_output=True, text=True, timeout=timeout)
         return r.returncode, (r.stderr or r.stdout).strip()
     except subprocess.TimeoutExpired:
         return 1, f"timeout {timeout}s"
