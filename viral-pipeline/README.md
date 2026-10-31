@@ -33,7 +33,8 @@ Cloud Shell **tak bisa** menghubungi Postgres DB-VPS langsung (`pg_hba` tak meng
 | `validate-queue.sql` | DB-VPS | Uji perilaku antrean (dedup, dua claim paralel, cleanup). Aman: membersihkan seed-nya sendiri. |
 | `bring-up-analyzer.sh` | .50 | Siapkan analyzer di VM fresh (clone + build + up), idempoten. `v1` (ringan) / `v2` (whisper+CLIP). |
 | `pexels_fetch.py` / `pixabay_fetch.py` | akses-vps | (Jalur C, 2026-08-29) sumber footage stok MENTAH per babak dari blueprint IR — dipanggil `orchestrator.py` best-effort stlh job `analyzed`. |
-| `push_raw_footage.py` | akses-vps | Push klip stok hasil fetch di atas → `gfootage:RAW-VIDEO/job-<id>/` (BEDA dari raw-footage §bawah — ini stok Pexels/Pixabay, bukan video sumber yg dianalisa). |
+| `push_raw_footage.py` | akses-vps | (2026-10-31: pindah dr Gdrive) Push klip stok hasil fetch di atas → RN7 `/sdcard/Movies/Seal/<job-id>_<fname>` via `adb push` (container `tool-appium`) — ini stok Pexels/Pixabay, bukan audio sumber Jalur 1 (§Audio-template). |
+| `footage-index-refresh.sh` | akses-vps (cron 30mnt) | (2026-10-31: pindah dr Gdrive) Snapshot `/sdcard/Movies/Seal/` RN7 (adb) → `footage-index.json` statis utk dashboard `editor.obc-crypto.com`. RN7 offline sesaat = output lama dipertahankan, bukan ditimpa 0 file. |
 | `dashboard_api.py` | akses-vps (systemd `viral-dashboard-api`) | (2026-10-19) Backend form input URL web, dipanggil `input.html` (nginx `pipeline.obc-crypto.com/input.html`). `POST /api/enqueue` → insert `media.video_ingest` (reuse `enqueue.py`), auth Bearer token (`~/.config/viral-dashboard/credentials.env`). Bind `172.19.0.1:8097` (gateway docker, nginx jalan di container). Install/aktifkan: `install-dashboard-api.sh`. |
 
 Repo ini adalah **sumber kebenaran**; `~/viral-pipeline` di akses-vps adalah symlink ke sini.
@@ -104,36 +105,43 @@ Catatan zoom: analyzer `734c838` pisah `zoom_in`/`zoom_out` (tanda divergence = 
 Detail selector VN + jebakan otomasi Appium: lihat memori `project_viral_analyzer` /
 `project_infinix_streaming_setup` + repo `tool-appium/docs/vn-automation-map.md`.
 
-## Raw-footage ke Gdrive (✅ 2026-10-17, revisi 19/10 + 21/10, permintaan user)
+## Audio-template ke Gdrive (✅ 2026-10-17, revisi 19/10 + 21/10, REVISI BESAR 31/10 permintaan user)
 
 Setiap job yang sukses `analyzed` otomatis lanjut (best-effort, kegagalan di
 sini TAK PERNAH menggagalkan job) ke `split_and_push_raw()` di
 `orchestrator.py`: tarik video sumber balik DB-VPS→akses-vps (satu-satunya
-node dgn ffmpeg+rclone+kredensial gfootage sekaligus), pisah **video TANPA
-audio** (`-an -c:v copy`, nol transcode, tetap kontainer MKV — codec asli
-dipertahankan) + **audio-only** (`-vn -c:a pcm_s16le` → **WAV**, revisi 21/10:
-semula stream-copy ke `.mka`/Matroska, diganti PCM supaya tak perlu
-demux-kontainer/decode-codec-kompresi apa pun → lebih andal terbaca user
-maupun tool AI lemah seperti transkripsi/analisa suara; sample rate+channel
-asli dipertahankan, cuma codec yang berubah) + **1 thumbnail** representatif
-(filter `thumbnail`, bukan frame fixed). Push ke Gdrive `maydualapan8@gmail.com`
-(remote rclone `gfootage:`).
+node dgn ffmpeg+rclone+kredensial gfootage sekaligus), ekstrak **audio-only
+-> MP3** (`-vn -c:a libmp3lame -q:a 2`), push FLAT 1 file per job ke Gdrive
+`maydualapan8@gmail.com` (remote rclone `gfootage:`).
 
-**SATU folder per job** (konsolidasi 19/10, semula 3 folder flat terpisah):
+**(2026-10-31) Video.mkv + thumbnail.jpg DIBUANG** (dulu ikut disimpan,
+sekarang tidak) — tujuan akhir "reproduksi" = bangun ulang pakai stok
+footage + VN-editor, bukan re-pakai video sumber asli, jadi cuma audio yang
+masih berguna disimpan sbg bank "trending sound" starter.
 
 | Folder Gdrive | Isi |
 |---|---|
-| `raw-footage/<judul> [<url>]/` | `video.mkv` + `audio.wav` + `thumbnail.jpg` |
-| `RAW-VIDEO/job-<id>/` *(beda pipeline)* | Stok Pexels/Pixabay — Jalur C, BEDA sumber |
+| `raw-template/` | Copy `reproductions/` (blueprint/recipe/IR/cutlist/story-script per job) — **manual**, dasar user bangun konten. **BUKAN** ditulis orchestrator. |
+| `audio-template/<judul> [<url>].mp3` | Audio hasil ekstrak Jalur 1, flat 1 file/job — bank trending-sound. |
 | `VN-exports/` *(beda pipeline)* | Hasil EDIT siap-publish (`premiere_pipeline.py`) |
 
-Nama folder = **judul asli video + URL sumber lengkap** (`<judul> [<url>]`,
+`RAW-VIDEO/` (Jalur C, stok Pexels/Pixabay) **DIPENSIUNKAN dari Gdrive**
+31/10 — target `push_raw_footage.py` pindah ke RN7 lokal (`adb push`, gabung
+`/sdcard/Movies/Seal/`, prefix nama file `<job-id>_`). `footage-index-refresh.sh`
+(feed dashboard `editor.obc-crypto.com`) ikut dialihkan: `adb shell stat` ke
+RN7 ganti `rclone lsjson` ke Gdrive — kalau RN7 lagi Doze/tak dicas (NORMAL,
+bukan kegagalan), output lama footage-index.json dipertahankan apa adanya,
+TAK ditimpa 0 file.
+
+Nama file/folder = **judul asli video + URL sumber lengkap** (`<judul> [<url>]`,
 disanitasi flat) — judul dari sidecar `work/job-<id>.info.json` (`yt-dlp
---write-info-json`, ditambah ke `download()`). Link folder ditulis balik ke
-`media.video_ingest.raw_footage_folder` bila minimal 1 aset sukses ter-upload.
-Disk-guard `RAW_MIN_DISK_MB=500` (hub pernah 93% penuh) + cleanup temp lokal
-di `finally`, apa pun hasilnya. **Diuji live end-to-end** (bukan dry-run):
-job nyata #153, lihat `project_viral_analyzer.md` di memori.
+--write-info-json`, ditambah ke `download()`). Link ditulis balik ke
+`media.video_ingest.raw_footage_folder` (nama kolom dipertahankan, isi kini
+path file mp3) bila upload sukses. Disk-guard `RAW_MIN_DISK_MB=500` (hub
+pernah 93% penuh) + cleanup temp lokal di `finally`, apa pun hasilnya.
+Versi video+audio+thumbnail (sblm 31/10) **diuji live end-to-end** (job nyata
+#153, lihat `project_viral_analyzer.md` di memori) — versi audio-only BELUM
+diuji live (lihat status di bawah).
 
 ## Status analisa
 

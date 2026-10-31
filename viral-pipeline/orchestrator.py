@@ -10,13 +10,23 @@ Kuras antrean `media.video_ingest` (DB-VPS). Per job:
 Gagal di langkah mana pun -> status 'pending' (retry) / 'dead' (habis) + last_error.
 
 (2026-10-17) Sejak job 'analyzed': video sumber (TANPA audio) + audio-only +
-1 thumbnail ditarik balik DB-VPS->hub & di-push ke Gdrive gfootage:
-raw-footage/<judul [url]>/{video.mkv,audio.wav,thumbnail.jpg} -- SATU folder
-per job (konsolidasi 2026-10-19, permintaan user; semula 3 folder flat
-terpisah) -- lihat split_and_push_raw(). Ini kolam bahan MENTAH hasil
-analisa, BEDA dari gfootage:RAW-VIDEO/ (stok Pexels/Pixabay, Jalur C)
-dan gfootage:VN-exports/ (hasil edit SIAP-PUBLISH, dipakai premiere_pipeline.py).
-Link folder ditulis balik ke media.video_ingest.raw_footage_folder.
+1 thumbnail ditarik balik DB-VPS->hub, diproses & di-push ke Gdrive -- lihat
+split_and_push_raw(). BEDA dari gfootage:RAW-VIDEO/ (stok Pexels/Pixabay,
+Jalur C, kini dipensiunkan -> lihat §RAW-VIDEO di bawah) dan gfootage:
+VN-exports/ (hasil edit SIAP-PUBLISH, dipakai premiere_pipeline.py).
+
+(2026-10-31, revisi besar permintaan user) Folder gfootage:raw-footage/ TIDAK
+lagi dipakai jalur ini -- direpurpose user jadi raw-template/ (isi: copy
+reproductions/, dasar manual utk bangun konten, bukan ditulis orchestrator).
+Jalur 1 skrg CUMA ekstrak audio -> MP3 (video.mkv+thumbnail DIBUANG, tak lagi
+berguna krn tujuan akhir "reproduksi" = bangun ulang pakai stok+VN-editor,
+bukan re-pakai video asli) -> push flat ke gfootage:audio-template/<judul
+[url]>.mp3 (bukan lagi 1 folder per job isi 3 file -- skrg 1 file per job).
+Link ditulis balik ke media.video_ingest.raw_footage_folder (nama kolom
+dipertahankan apa adanya, isinya kini path file mp3).
+RAW-VIDEO sendiri (Jalur C, push_raw_footage.py) dipensiunkan dari Gdrive --
+target baru = RN7 lokal (adb push, gabung folder Movies/Seal/), lihat
+push_raw_footage.py & footage-index-refresh.sh.
 
 Prasyarat runtime: user aktifkan .50 + analyzer healthy (bring-up-analyzer.sh);
 DB-VPS reachable; cookies+yt-dlp+deno di DB-VPS ~/viral-pipeline/.
@@ -54,16 +64,15 @@ FOOTAGE_TIMEOUT  = int(os.getenv("FOOTAGE_TIMEOUT", "600"))  # detik/skrip; jari
 # reuse helper yg sama (send-telegram.sh, no-op anggun kalau kredensial
 # belum diisi -- lihat isi skrip itu).
 TELEGRAM_SCRIPT = os.path.expanduser("~/akses-vps/backup/send-telegram.sh")
-# (2026-10-17) permintaan user: simpan bahan MENTAH sumber Tier-2 (video TANPA
-# audio + audio-only + 1 thumbnail) ke Gdrive gfootage: -- TERPISAH dari
-# RAW-VIDEO (stok Pexels/Pixabay, Jalur C lama) dan VN-exports (hasil edit
-# SIAP-PUBLISH) -- supaya "bahan mentah hasil analisa" tak tercampur dgn
-# "video siap publish". Proses jalan LOKAL di hub (bukan DB-VPS/.50 --
-# keduanya nol ffmpeg+kredensial gfootage, lihat audit 17/10), pola sama
-# persis fetch_and_push_footage() (tarik->proses->push->best-effort).
-# (2026-10-19) permintaan user: konsolidasi -- SATU folder per job (video+
-# audio+thumb bersama di dalamnya), semula 3 folder flat terpisah per jenis.
-GFOOTAGE_ROOT = "gfootage:raw-footage/"
+# (2026-10-17) permintaan user: simpan bahan MENTAH sumber Tier-2 ke Gdrive
+# gfootage: -- TERPISAH dari RAW-VIDEO (stok Pexels/Pixabay, Jalur C) dan
+# VN-exports (hasil edit SIAP-PUBLISH). Proses jalan LOKAL di hub (bukan
+# DB-VPS/.50 -- keduanya nol ffmpeg+kredensial gfootage, lihat audit 17/10).
+# (2026-10-19) konsolidasi -- SATU folder per job. (2026-10-31, DIBATALKAN
+# oleh revisi di bawah) permintaan user: raw-footage/ direpurpose jadi
+# raw-template/ (manual, isi reproductions/) -- jalur ini pindah target ke
+# audio-template/, CUMA audio, flat 1 file per job (bukan 1 folder/3 file).
+GFOOTAGE_ROOT = "gfootage:audio-template/"
 RAW_WORKDIR = os.path.expanduser("~/viral-pipeline/raw-work")
 RAW_MIN_DISK_MB = 500  # lindungi disk hub (pernah 93% penuh, lihat social-trend-cron.sh)
 
@@ -303,12 +312,24 @@ def fetch_and_push_footage(job, outdir):
         log("  (footage: tak ada plan yg berhasil, push ke Gdrive dilewati)")
         return
 
-    r = sh_safe(["python3", PUSH_RAW_FOOTAGE] + plans, timeout=FOOTAGE_TIMEOUT)
-    if r.returncode != 0:
-        log("  (footage: push_raw_footage.py gagal, klip TETAP lokal di hub, tak sampai Gdrive):",
-            (_last_line(r) or r.stdout or "")[-200:])
-    else:
-        log(f"  footage -> gfootage:RAW-VIDEO/job-{jid}/ :", _last_line(r)[:150])
+    # (2026-10-29) FIX bug nyata job-5: dulu SATU panggilan push_raw_footage.py
+    # dgn SEMUA plans sekaligus berbagi SATU budget FOOTAGE_TIMEOUT -- job dgn
+    # banyak/klip besar (job-5: 13 fase x 2 provider, salah satunya 122MB) bisa
+    # timeout di tengah upload provider kedua PADAHAL provider pertama sudah
+    # sukses penuh (lihat ~/viral-drain.log baris 655). Akibatnya klip provider
+    # kedua TAK sampai Gdrive secara SENYAP (job tetap 'analyzed', nol tanda
+    # merah di DB -- lihat memori feedback_kegagalan_menyamar_sukses). Fix:
+    # panggil push_raw_footage.py TERPISAH per plan/provider, masing-masing
+    # dpt budget FOOTAGE_TIMEOUT PENUH sendiri -- timeout provider A tak lagi
+    # memotong jatah provider B.
+    for plan_path in plans:
+        r = sh_safe(["python3", PUSH_RAW_FOOTAGE, plan_path], timeout=FOOTAGE_TIMEOUT)
+        fname = os.path.basename(plan_path)
+        if r.returncode != 0:
+            log(f"  (footage: push_raw_footage.py gagal utk {fname}, klip TETAP lokal di hub, tak sampai Gdrive):",
+                (_last_line(r) or r.stdout or "")[-200:])
+        else:
+            log(f"  footage -> gfootage:RAW-VIDEO/job-{jid}/ ({fname}):", _last_line(r)[:150])
 
 def disk_avail_mb(path="/"):
     try:
@@ -361,78 +382,65 @@ def rclone_push(local_path, remote_dir, remote_name, timeout=180):
 
 
 def split_and_push_raw(job, dbvps_relpath, title):
-    """(2026-10-17, permintaan user) video TANPA audio (-c:v copy, nol re-
-    encode -- 'raw' = codec asli dipertahankan) -> MKV, audio-only -> WAV
-    (2026-10-21: diubah dari MKA/stream-copy KE PCM 16-bit `pcm_s16le`
-    -- permintaan user: WAV TAK butuh demux kontainer/decode codec kompresi
-    apa pun, jadi lebih andal terbaca oleh user maupun tool AI lemah
-    [transkripsi/analisa suara] drpd Opus/AAC di-dalam-Matroska; sample
-    rate+channel asli DIPERTAHANKAN, cuma codec yg berubah -- bukan downsample
-    sengaja), + 1 thumbnail representatif (filter `thumbnail`, bukan frame
-    fixed -- hindari frame hitam/transisi) -> JPG.
-    Ketiganya masuk SATU folder Gdrive bernama '<judul> [<url>]/' (konsolidasi
-    2026-10-19), isi: video.mkv + audio.wav + thumbnail.jpg. Link folder itu
-    ditulis balik ke media.video_ingest.raw_footage_folder bila minimal 1
-    aset sukses ter-upload.
+    """(2026-10-31, revisi permintaan user -- gantikan versi video+audio+thumb
+    2026-10-17/19) CUMA ekstrak audio -> MP3 (video.mkv+thumbnail.jpg DIBUANG:
+    tujuan akhir "reproduksi" = bangun ulang pakai stok footage+VN-editor,
+    bukan re-pakai video sumber asli -- jadi video/thumb tak lagi berguna
+    disimpan). Push FLAT 1 file per job (bukan 1 folder/3 file spt dulu) ke
+    gfootage:audio-template/<judul [url]>.mp3 -- "audio template" = bank
+    audio trending hasil scrape, dasar user pilih backsound/VO starter.
+    Link file ditulis balik ke media.video_ingest.raw_footage_folder (nama
+    kolom dipertahankan, isinya kini path file mp3 bukan folder).
     Best-effort PENUH (pola sama build_reproduction()/fetch_and_push_footage()):
     job SUDAH 'analyzed' sebelum dipanggil, kegagalan di SINI (ffmpeg/rclone/
     disk penuh/exception apa pun) TAK PERNAH menggagalkan job -- fungsi ini
     TAK PERNAH raise ke pemanggil."""
     jid = job["id"]
     # didefinisikan DULUAN (bukan di tengah try) supaya finally selalu punya
-    # 4 nama path yg konsisten utk dibersihkan, apa pun titik return/exception
+    # nama path yg konsisten utk dibersihkan, apa pun titik return/exception
     # di bawah -- tanpa ini, cleanup jadi rawan NameError/path salah.
     ext = os.path.splitext(dbvps_relpath)[1] or ".mp4"
     src = os.path.join(RAW_WORKDIR, f"job-{jid}{ext}")
-    out_v = os.path.join(RAW_WORKDIR, f"job-{jid}.video.mkv")
-    out_a = os.path.join(RAW_WORKDIR, f"job-{jid}.audio.wav")
-    out_t = os.path.join(RAW_WORKDIR, f"job-{jid}.thumb.jpg")
+    out_a = os.path.join(RAW_WORKDIR, f"job-{jid}.audio.mp3")
     try:
         if disk_avail_mb() < RAW_MIN_DISK_MB:
-            log(f"  (raw-footage: disk hub <{RAW_MIN_DISK_MB}MB, dilewati)")
+            log(f"  (audio-template: disk hub <{RAW_MIN_DISK_MB}MB, dilewati)")
             return
         os.makedirs(RAW_WORKDIR, exist_ok=True)
         name = safe_name(title, job.get("url"))
 
         ok, err = pull_from_dbvps(dbvps_relpath, src)
         if not ok:
-            log("  (raw-footage: tarik file dr DB-VPS gagal):", err)
+            log("  (audio-template: tarik file dr DB-VPS gagal):", err)
             return
 
-        folder = GFOOTAGE_ROOT + name + "/"
-        pushed = []
-        for key, args, out, fname in (
-            ("video", ["-i", src, "-an", "-c:v", "copy", out_v], out_v, "video.mkv"),
-            ("audio", ["-i", src, "-vn", "-c:a", "pcm_s16le", out_a], out_a, "audio.wav"),
-            ("thumb", ["-i", src, "-vf", "thumbnail", "-frames:v", "1", out_t], out_t, "thumbnail.jpg"),
-        ):
-            ok, err = ffmpeg_run(args)
-            if not ok:
-                log(f"  (raw-footage: ffmpeg {key} gagal):", err)
-                continue
-            ok, err = rclone_push(out, folder, fname)
-            if ok:
-                pushed.append(key)
-            else:
-                log(f"  (raw-footage: push {key} gagal):", err)
+        ok, err = ffmpeg_run(["-i", src, "-vn", "-c:a", "libmp3lame", "-q:a", "2", out_a])
+        if not ok:
+            log("  (audio-template: ffmpeg audio gagal):", err)
+            return
 
-        if pushed:
-            f_esc = folder.replace("'", "''")
-            r = psql(f"UPDATE media.video_ingest SET raw_footage_folder='{f_esc}' WHERE id={jid};")
-            if r.returncode != 0:
-                log("  (raw-footage: gagal tulis balik raw_footage_folder):", r.stderr.strip()[:200])
+        dest = GFOOTAGE_ROOT + name + ".mp3"
+        ok, err = rclone_push(out_a, GFOOTAGE_ROOT, name + ".mp3")
+        if not ok:
+            log("  (audio-template: push gagal):", err)
+            return
 
-        log(f"  raw-footage: {len(pushed)}/3 ter-upload ({','.join(pushed) or '-'}) -> {folder}")
+        d_esc = dest.replace("'", "''")
+        r = psql(f"UPDATE media.video_ingest SET raw_footage_folder='{d_esc}' WHERE id={jid};")
+        if r.returncode != 0:
+            log("  (audio-template: gagal tulis balik raw_footage_folder):", r.stderr.strip()[:200])
+
+        log(f"  audio-template: ter-upload -> {dest}")
     except Exception as e:
-        log("  (raw-footage: exception, dilewati):", repr(e)[:200])
+        log("  (audio-template: exception, dilewati):", repr(e)[:200])
     finally:
-        for p in (src, out_v, out_a, out_t):
+        for p in (src, out_a):
             try:
                 os.remove(p)
             except FileNotFoundError:
                 pass
             except Exception as e:
-                log(f"  (raw-footage: gagal hapus temp {p}):", repr(e)[:100])
+                log(f"  (audio-template: gagal hapus temp {p}):", repr(e)[:100])
 
 
 def cleanup(jid):
