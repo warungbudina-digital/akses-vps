@@ -66,9 +66,19 @@ def job_id_of(plan_path):
 
 
 def adb(container, args, timeout=60):
-    r = subprocess.run(["docker", "exec", container, "adb"] + args,
-                        capture_output=True, text=True, timeout=timeout)
-    return r.returncode, (r.stderr or r.stdout).strip()
+    """TAK PERNAH raise (pola sh_safe() di orchestrator.py) -- RN7 sering
+    Doze/tak dicas, docker exec ke adb bisa hang lama MELEBIHI timeout
+    (bukan cuma gagal cepat), jadi TimeoutExpired/OSError WAJIB ditangkap
+    di sini, bukan di pemanggil -- celah nyata ditemukan 31/10: job-7/8
+    crash traceback mentah persis krn ini belum ditangkap."""
+    try:
+        r = subprocess.run(["docker", "exec", container, "adb"] + args,
+                            capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stderr or r.stdout).strip()
+    except subprocess.TimeoutExpired:
+        return 1, f"timeout {timeout}s"
+    except Exception as e:
+        return 1, repr(e)[:200]
 
 
 def resolve_udid(container, rn7_ip):
@@ -90,9 +100,14 @@ def resolve_udid(container, rn7_ip):
 def adb_push(container, udid, local, remote, dry_run, timeout=300):
     if dry_run:
         return 0, f"(dry-run) {local} -> {remote}"
-    r = subprocess.run(["docker", "exec", container, "adb", "-s", udid, "push", local, remote],
-                        capture_output=True, text=True, timeout=timeout)
-    return r.returncode, (r.stderr or r.stdout).strip()
+    try:
+        r = subprocess.run(["docker", "exec", container, "adb", "-s", udid, "push", local, remote],
+                            capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stderr or r.stdout).strip()
+    except subprocess.TimeoutExpired:
+        return 1, f"timeout {timeout}s"
+    except Exception as e:
+        return 1, repr(e)[:200]
 
 
 def main():

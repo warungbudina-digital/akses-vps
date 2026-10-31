@@ -282,11 +282,12 @@ def _last_line(r):
     return lines[-1] if lines else ""
 
 def fetch_and_push_footage(job, outdir):
-    """(2026-08-29, Jalur C permintaan user "otomatis") Sekalian sumber-kan
-    footage stok MENTAH per babak (Pexels + Pixabay, dua provider = lebih
-    banyak kandidat klip per babak) & kirim ke Gdrive gfootage:RAW-VIDEO/
-    job-<id>/ -- bahan baku siap diedit manual bebas oleh user sendiri
-    (dipandu editor.obc-crypto.com/.story-script.md), BEDA dari
+    """(2026-08-29, Jalur C permintaan user "otomatis"; target pindah ke RN7
+    31/10) Sekalian sumber-kan footage stok MENTAH per babak (Pexels +
+    Pixabay, dua provider = lebih banyak kandidat klip per babak) & kirim ke
+    RN7 lokal (/sdcard/Movies/Seal/, gfootage:RAW-VIDEO/ dipensiunkan) --
+    bahan baku siap diedit manual bebas oleh user sendiri (dipandu
+    editor.obc-crypto.com/.story-script.md), BEDA dari
     build_reproduction() (itu bikin cetak-biru utk edit OTOMATIS/VN-HP).
     Best-effort PENUH sama spt build_reproduction(): job SUDAH 'analyzed' di
     DB sebelum dipanggil, kegagalan di sini TAK PERNAH menggagalkan job."""
@@ -326,10 +327,10 @@ def fetch_and_push_footage(job, outdir):
         r = sh_safe(["python3", PUSH_RAW_FOOTAGE, plan_path], timeout=FOOTAGE_TIMEOUT)
         fname = os.path.basename(plan_path)
         if r.returncode != 0:
-            log(f"  (footage: push_raw_footage.py gagal utk {fname}, klip TETAP lokal di hub, tak sampai Gdrive):",
+            log(f"  (footage: push_raw_footage.py gagal utk {fname}, klip TETAP lokal di hub, tak sampai RN7):",
                 (_last_line(r) or r.stdout or "")[-200:])
         else:
-            log(f"  footage -> gfootage:RAW-VIDEO/job-{jid}/ ({fname}):", _last_line(r)[:150])
+            log(f"  footage -> RN7 Movies/Seal/ (prefix job-{jid}_, {fname}):", _last_line(r)[:150])
 
 def disk_avail_mb(path="/"):
     try:
