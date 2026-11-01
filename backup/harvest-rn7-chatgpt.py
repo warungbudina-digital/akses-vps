@@ -53,7 +53,12 @@ FENNEC = "org.mozilla.fennec_fdroid"
 SOCK = f"localabstract:{FENNEC}/firefox-debugger-socket"
 RDP_PORT = int(os.environ.get("RDP_PORT", "6001"))
 DBVPS = os.environ.get("DBVPS_HOST", "db-vps")
-REMOTE_PAYLOAD = "/tmp/ai_chatlog_payload.jsonl"
+# HARDEN (code-review): dulu path hardcode dipakai BERSAMA oleh skrip ini
+# (standalone) dan harvest-rn7-ai.py tanpa lock/uniqueness -- run yg tumpang
+# tindih bisa balapan (cat> milik satu proses menimpa saat \copy proses lain
+# masih baca, atau rm -f menghapus file yg masih dipakai). Sertakan PID
+# supaya tiap proses pakai file sendiri.
+REMOTE_PAYLOAD = f"/tmp/ai_chatlog_payload-{os.getpid()}.jsonl"
 SOURCE = "chatgpt"
 
 
@@ -83,12 +88,26 @@ def sh(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
+SSH_CONTROL_PATH = f"/tmp/.ssh-mux-dbvps-{os.getpid()}"
+
+
 def sshdb(args, stdin_data=None, timeout=180):
     """db-vps mencetak banner login besar ke STDERR tiap koneksi -> dibuang.
     Deteksi gagal TIDAK bergantung stderr, melainkan returncode + verifikasi
-    hasil (pola sama dgn pi-vault-backup.sh)."""
+    hasil (pola sama dgn pi-vault-backup.sh).
+
+    HARDEN (code-review): dulu tiap panggilan buka koneksi SSH baru dari nol
+    (handshake TCP+auth penuh) -> bisa ~16x per run (existing/ignored x3
+    source, load_payload x3 source, psql ringkasan). Sekarang pakai SSH
+    ControlMaster: panggilan PERTAMA dlm proses ini bikin socket kendali di
+    ControlPath (nama unik per-PID, aman dipakai paralel), panggilan
+    berikutnya nebeng koneksi yg sama. ControlPersist=60 jaga socket tetap
+    hidup 60dtk sesudah client terakhir lepas (nutup jeda antar-panggilan
+    dlm satu run), lalu otomatis tutup sendiri kalau menganggur."""
     return subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", DBVPS] + args,
+        ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+         "-o", "ControlMaster=auto", "-o", f"ControlPath={SSH_CONTROL_PATH}",
+         "-o", "ControlPersist=60", DBVPS] + args,
         input=stdin_data, capture_output=True, text=True, timeout=timeout)
 
 
@@ -171,20 +190,56 @@ def ensure_rdp():
     raise RuntimeError(f"RDP tetap diam setelah restart Fennec: {repr(last)[:200]}")
 
 
-def open_chatgpt_tab(client):
-    tabs = client.list_tabs()
-    tab = next((t for t in tabs if "chatgpt.com" in (t.get("url") or "")), None)
+def open_tab(client, url_match, url_open, tries=5):
+    """Cari tab yg URL-nya memuat `url_match`; buka `url_open` kalau belum ada.
+
+    HARDEN 2026-09-20: jam 05:00 (load RN7 tinggi / Fennec baru di-restart oleh
+    ensure_rdp) tab sering belum muncul dlm sleep tetap 10 dtk -> dulu langsung
+    "gagal membuka tab" & harvest gagal total. Sekarang: retry `am start`
+    beberapa kali, tiap kali POLLING daftar tab (bukan tidur tunggal) sampai
+    tab muncul. Idempoten: kalau tab keburu ada, langsung pakai.
+
+    (code-review fix #11, dipindah ke sini dari harvest-rn7-ai.py 2026-11-01:
+    dulu versi di-harden ini cuma dipakai ai.py, sedangkan main() standalone
+    skrip ini masih pakai open_chatgpt_tab() lama -- tab tak ketemu di jam
+    sibuk 05:00 -> raise langsung tanpa retry. Fungsi ini jadi SATU-SATUNYA
+    implementasi, dipakai bersama via impor `cg.open_tab` di ai.py).
+
+    (code-review fix #13) find() dibenahi dua hal: (a) kalau ADA BEBERAPA
+    tab yg cocok (duplikat tersisa dr run sebelumnya), pilih yg `selected`
+    dulu baru fallback tab pertama -- bukan asal tabs[0] yg bisa jadi tab
+    basi; (b) sebelum menyerah & menembak intent `am start` BARU (yg
+    berisiko bikin tab duplikat lagi), poll singkat dulu -- snapshot
+    tab-list RDP kadang sesaat belum merefleksikan tab yg baru saja
+    dinavigasi (match substring kasar jadi False-negative, bukan tab
+    beneran tak ada)."""
+    def find():
+        matches = [t for t in client.list_tabs() if url_match in (t.get("url") or "")]
+        if not matches:
+            return None
+        return next((t for t in matches if t.get("selected")), matches[0])
+
+    tab = find()
     if tab is None:
-        log("tab chatgpt.com belum ada - membuka...")
+        for _ in range(3):
+            time.sleep(1)
+            tab = find()
+            if tab is not None:
+                break
+    if tab is not None:
+        return client.attach_tab(tab)
+
+    for attempt in range(1, tries + 1):
+        log(f"tab {url_match} belum ada - membuka (coba {attempt}/{tries})...")
         sh([ADB, "-s", RN7, "shell",
-            'am start -a android.intent.action.VIEW -d "https://chatgpt.com/" '
+            f'am start -a android.intent.action.VIEW -d "{url_open}" '
             f'-n {FENNEC}/org.mozilla.fenix.IntentReceiverActivity'])
-        time.sleep(9)
-        tabs = client.list_tabs()
-        tab = next((t for t in tabs if "chatgpt.com" in (t.get("url") or "")), None)
-    if tab is None:
-        raise RuntimeError("gagal membuka tab chatgpt.com di RN7")
-    return client.attach_tab(tab)
+        for _ in range(8):            # polling ~24 dtk per percobaan
+            time.sleep(3)
+            tab = find()
+            if tab is not None:
+                return client.attach_tab(tab)
+    raise RuntimeError(f"gagal membuka tab {url_open}")
 
 
 def js_json(client, console, body, timeout=90):
@@ -195,23 +250,28 @@ def js_json(client, console, body, timeout=90):
 
 
 def check_login(client, console):
+    """Verifikasi login + ambil bearer token SEKALIGUS dari SATU fetch
+    /api/auth/session (code-review fix #15/#10: dulu field session ini
+    di-fetch ulang dari nol di 3 tempat terpisah - check_login, fetch_list,
+    DAN sekali per percakapan di fetch_conversation - padahal isinya tak
+    mungkin berubah dalam satu run. Sekarang di-fetch sekali di sini,
+    token-nya diteruskan ke fetch_list/fetch_conversation sbg parameter)."""
     d = js_json(client, console, """
-      const res = await fetch('/api/auth/session', {credentials:'include'});
-      const j = await res.json().catch(() => ({}));
+      const j = await (await fetch('/api/auth/session', {credentials:'include'})).json().catch(() => ({}));
       window.__rdp_out = JSON.stringify({ok: !!(j && j.user),
-        email: (j && j.user && j.user.email) || null});
+        email: (j && j.user && j.user.email) || null,
+        accessToken: (j && j.accessToken) || null});
     """)
     if not d.get("ok"):
         raise RuntimeError("ChatGPT-web di RN7 TIDAK login - perlu login manual dulu "
                            "(SOP: kredensial diketik user sendiri, bukan oleh skrip)")
-    return d["email"]
+    return d["email"], d["accessToken"]
 
 
-def fetch_list(client, console, limit):
+def fetch_list(client, console, limit, token):
     d = js_json(client, console, f"""
-      const s = await (await fetch('/api/auth/session', {{credentials:'include'}})).json();
       const res = await fetch('/backend-api/conversations?offset=0&limit={limit}&order=updated', {{
-        credentials:'include', headers:{{'Authorization':'Bearer '+s.accessToken}}}});
+        credentials:'include', headers:{{'Authorization':'Bearer {token}'}}}});
       const j = await res.json();
       window.__rdp_out = JSON.stringify({{total: j.total, items: (j.items||[]).map(c => ({{
         id: c.id, title: c.title, create_time: c.create_time, update_time: c.update_time}}))}});
@@ -219,11 +279,10 @@ def fetch_list(client, console, limit):
     return d
 
 
-def fetch_conversation(client, console, cid):
+def fetch_conversation(client, console, cid, token):
     return js_json(client, console, f"""
-      const s = await (await fetch('/api/auth/session', {{credentials:'include'}})).json();
       const res = await fetch('/backend-api/conversation/{cid}', {{
-        credentials:'include', headers:{{'Authorization':'Bearer '+s.accessToken}}}});
+        credentials:'include', headers:{{'Authorization':'Bearer {token}'}}}});
       const j = await res.json();
       const msgs = Object.values(j.mapping || {{}})
         .filter(n => n.message && n.message.content && n.message.content.parts)
@@ -288,16 +347,26 @@ def load_payload(records):
     sshdb(["rm", "-f", REMOTE_PAYLOAD])
 
 
-def existing_state():
-    """id -> updated_at(epoch) yg sudah tersimpan, utk lewati yg tak berubah."""
-    out = psql("SELECT id, COALESCE(EXTRACT(EPOCH FROM updated_at),0) FROM conversations "
-               f"WHERE source = '{SOURCE}';")
-    state = {}
+def existing_state(sources=(SOURCE,)):
+    """source -> {id: updated_at(epoch)} yg sudah tersimpan, utk lewati yg
+    tak berubah.
+
+    (code-review fix #9/#14) Digeneralisasi nerima BEBERAPA source sekaligus
+    dlm SATU query (`WHERE source IN (...)`) -- dulu versi ai.py (existing())
+    manual duplikat fungsi ini persis tapi dipanggil 1x per source (sampai 6
+    round-trip SSH utk 3 source). Sekarang SATU implementasi di sini, dipakai
+    bersama oleh main() standalone (lewat `[SOURCE]`) dan harvest-rn7-ai.py
+    (lewat daftar source penuh, via impor `cg.existing_state`)."""
+    src_list = ",".join(f"'{s}'" for s in sources)
+    out = psql("SELECT source, id, COALESCE(EXTRACT(EPOCH FROM updated_at),0) "
+               f"FROM conversations WHERE source IN ({src_list});")
+    state = {s: {} for s in sources}
     for line in out.splitlines():
-        if "|" in line:
-            cid, ts = line.split("|", 1)
+        parts = line.split("|", 2)
+        if len(parts) == 3:
+            src, cid, ts = parts
             try:
-                state[cid.strip()] = float(ts.strip())
+                state.setdefault(src.strip(), {})[cid.strip()] = float(ts.strip())
             except ValueError:
                 pass
     return state
@@ -315,15 +384,15 @@ def main():
     from rdp import RDP
     client = RDP(port=RDP_PORT, timeout=40)
     try:
-        console = open_chatgpt_tab(client)
-        email = check_login(client, console)
+        console = open_tab(client, "chatgpt.com", "https://chatgpt.com/")
+        email, token = check_login(client, console)
         log(f"login OK sbg {email}")
 
-        listing = fetch_list(client, console, a.limit)
+        listing = fetch_list(client, console, a.limit, token)
         items = listing.get("items", [])
         log(f"{listing.get('total')} percakapan di akun, {len(items)} terambil di daftar")
 
-        known = {} if a.force else existing_state()
+        known = {} if a.force else existing_state([SOURCE]).get(SOURCE, {})
         todo = [c for c in items
                 if a.force or c["id"] not in known
                 or abs(known[c["id"]] - (to_epoch(c.get("update_time")) or 0)) > 1]
@@ -333,9 +402,9 @@ def main():
         records = []
         for i, c in enumerate(todo, 1):
             try:
-                full = fetch_conversation(client, console, c["id"])
+                full = fetch_conversation(client, console, c["id"], token)
             except Exception as e:
-                log(f"  [{i}/{len(todo)}] GAGAL {c['title'][:40]!r}: {e}")
+                log(f"  [{i}/{len(todo)}] GAGAL {str(c.get('title'))[:40]!r}: {e}")
                 continue
             msgs = full.get("messages", [])
             records.append({
