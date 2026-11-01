@@ -152,6 +152,49 @@ def harvest_claude(client, max_new, force, known, skip):
 
 # ----------------------------- GEMINI ------------------------------
 
+def _gemini_sidebar_tap_fallback():
+    """Fallback kalau klik sintetis RDP gagal buka drawer riwayat Gemini.
+
+    (Diselidiki+diverifikasi 2026-11-01) UI mobile Gemini (mat-drawer-over)
+    MENOLAK event sintetis (.click()/dispatchEvent MouseEvent penuh) secara
+    KONSISTEN di build ini -- bukan kadang gagal, tapi selalu. Tapi event
+    sentuh OS-level ASLI via `adb shell input tap` di titik koordinat yg
+    SAMA PERSIS BERHASIL membuka drawer, diverifikasi 3x (2x langsung
+    berturut, 1x lagi setelah reload bersih + RN7 sempat offline & online
+    kembali -- konsisten tiap kali layar dlm keadaan AWAKE).
+
+    Koordinat dikalibrasi EMPIRIS khusus RN7 (1080x2340 fisik): diukur dari
+    getBoundingClientRect() elemen acuan (tombol close drawer & teks judul
+    percakapan) dibandingkan posisi piksel asli di screenshot, menghasilkan
+    physical_px = css_px * devicePixelRatio(~2.61) + offset_chrome(~247, tinggi
+    URL-bar Fennec yg TAK bisa dihitung dari JS/CSS - browser sengaja tak
+    expose tinggi chrome native ke web content). Kalau Gemini/Fennec ganti
+    layout drawer-opener di masa depan & fallback ini mulai gagal lagi:
+    screenshot ulang + getBoundingClientRect() elemen acuan, lalu hitung ulang
+    dgn rumus yg sama -- JANGAN asal tebak koordinat baru.
+
+    JEBAKAN NYATA (ditemukan 2026-11-01 saat run gabungan 3-source): `adb
+    shell input tap` beroperasi di tab Fennec yg SEDANG TAMPIL DI LAYAR FISIK
+    -- BUKAN tab yg sedang "di-attach" via RDP. attach_tab() cuma mengganti
+    konteks JS yg dieksekusi, TAK memaksa Android menampilkan tab itu di
+    layar. Kalau chatgpt/claude dipanen duluan (biasa, krn ADAPTERS jalan
+    berurutan), layar fisik MASIH nampilin tab terakhir mereka saat giliran
+    gemini tiba -- tap salah sasaran (pernah nyasar ke drawer Claude, untung
+    tak merusak apa pun, tapi gemininya sendiri tetap gagal dibaca). Fix:
+    paksa tab Gemini ke foreground LAYAR FISIK dulu via intent VIEW yg sama
+    dipakai open_tab() utk buka tab baru -- Fennec mengenali URL yg cocok
+    tab yg sudah ada & PINDAH ke situ (bukan bikin tab baru), baru setelah
+    itu tap koordinatnya valid."""
+    sh([ADB, "-s", RN7, "shell", "input keyevent KEYCODE_WAKEUP"])
+    time.sleep(0.5)
+    sh([ADB, "-s", RN7, "shell",
+        'am start -a android.intent.action.VIEW -d "https://gemini.google.com/app" '
+        f'-n {FENNEC}/org.mozilla.fenix.IntentReceiverActivity'])
+    time.sleep(2)
+    sh([ADB, "-s", RN7, "shell", "input tap 83 331"])
+    time.sleep(2)
+
+
 def harvest_gemini(client, max_new, force, known, skip):
     console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
     # Mulai dari kondisi yg PASTI. Panen sebelumnya meninggalkan tab di
@@ -254,10 +297,46 @@ def harvest_gemini(client, max_new, force, known, skip):
     # Hanya percaya "0 percakapan" kalau daftar benar bisa dibaca: ada link ATAU
     # drawer riwayat BENAR-BENAR terbuka (berarti kosong asli). Selain itu -> BUTA.
     if not items and not lst.get("drawerOpened"):
+        # (diselidiki+fix 2026-11-01) klik sintetis RDP TERBUKTI selalu gagal
+        # di UI mobile Gemini build ini -- coba fallback real-tap OS-level via
+        # adb sebelum menyerah (lihat _gemini_sidebar_tap_fallback()).
+        log("gemini: drawer tak terbuka via klik sintetis -- coba real-tap OS-level (fallback)...")
+        _gemini_sidebar_tap_fallback()
+        # (fix race condition, ditemukan 2026-11-01) tap fisik BERHASIL buka
+        # drawer tapi animasi slide-in + render Angular/React-nya butuh lebih
+        # dari sesaat -- cek sekali langsung pasca-tap sering masih "belum",
+        # padahal screenshot sesaat sesudahnya BENAR terbuka. Poll singkat
+        # drpd satu cek tunggal, sama pola dgn loop klik sintetis di atas.
+        lst = js_json(client, console, """
+          const bacaLink = () => {
+            const links = [...document.querySelectorAll('a[href^="/app/"]')]
+              .map(a => ({id: (a.getAttribute('href')||'').split('/app/')[1],
+                          title: (a.innerText||'').trim()}))
+              .filter(x => x.id && x.title);
+            const seen = new Set(); const out = [];
+            for (const l of links) { if (!seen.has(l.id)) { seen.add(l.id); out.push(l); } }
+            return out;
+          };
+          const drawerStatus = () => {
+            const nav = document.querySelector('mat-sidenav');
+            return !!(nav && nav.classList.contains('mat-drawer-opened'));
+          };
+          let items = bacaLink();
+          for (let att = 0; att < 4 && !items.length && !drawerStatus(); att++) {
+            await new Promise(r => setTimeout(r, 1500));
+            items = bacaLink();
+          }
+          window.__rdp_out = JSON.stringify({n: items.length, items, drawerOpened: drawerStatus()});
+        """, timeout=30)
+        items = lst.get("items", [])
+        if items or lst.get("drawerOpened"):
+            log(f"gemini: real-tap fallback berhasil, {len(items)} percakapan terbaca.")
+    if not items and not lst.get("drawerOpened"):
         raise RuntimeError(
             "daftar Gemini TAK BISA DIBACA: drawer riwayat tak terbuka via klik "
-            "(UI mobile Gemini mat-drawer menolak klik sintetis - perlu adb-tap "
-            "OS-level / viewport desktop; atau opener hilang). BUKAN akun kosong.")
+            "sintetis MAUPUN real-tap OS-level fallback (UI Gemini kemungkinan "
+            "ganti lagi, atau koordinat kalibrasi di _gemini_sidebar_tap_fallback() "
+            "usang - perlu dihitung ulang). BUKAN akun kosong.")
     log(f"gemini: {len(items)} percakapan terlihat di daftar 'Terbaru'")
 
     # Gemini tak memberi timestamp di daftar -> dedup pakai KEBERADAAN id saja.
