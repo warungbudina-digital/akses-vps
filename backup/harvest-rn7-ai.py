@@ -88,7 +88,8 @@ def harvest_chatgpt(client, max_new, force):
     skip = ignored("chatgpt")
     known = {} if force else existing("chatgpt")
     todo = [c for c in items
-            if force or abs(known.get(c["id"], -1) - (to_epoch(c.get("update_time")) or 0)) > 1]
+            if force or c["id"] not in known
+            or abs(known[c["id"]] - (to_epoch(c.get("update_time")) or 0)) > 1]
     todo = [c for c in todo if c["id"] not in skip][:max_new]
     out = []
     for i, c in enumerate(todo, 1):
@@ -137,7 +138,8 @@ def harvest_claude(client, max_new, force):
     skip = ignored("claude")
     known = {} if force else existing("claude")
     todo = [c for c in items
-            if force or abs(known.get(c["id"], -1) - (to_epoch(c.get("updated")) or 0)) > 1]
+            if force or c["id"] not in known
+            or abs(known[c["id"]] - (to_epoch(c.get("updated")) or 0)) > 1]
     todo = [c for c in todo if c["id"] not in skip][:max_new]
     out = []
     for i, c in enumerate(todo, 1):
@@ -298,10 +300,33 @@ def harvest_gemini(client, max_new, force):
             # bukan string JSON lagi - jebakan nyata saat pengujian.)
             try:
                 client.eval_js(console, f"location.href='/app/{c['id']}';", timeout=10)
-            except Exception:
-                pass
-            time.sleep(9)
-            console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
+            except Exception as e:
+                log(f"  gemini [{i}/{len(todo)}] navigasi ke {c['id']} error ({e}), verifikasi tetap dicoba...")
+
+            # HARDEN (code-review): dulu tidur tetap 9dtk lalu attach tab GEMINI
+            # MANAPUN (match substring domain kasar) tanpa cek apakah tab itu
+            # BENAR sudah pindah ke percakapan c['id'] - navigasi lambat/gagal
+            # bisa diam-diam membaca DOM percakapan LAMA tapi tersimpan ke DB
+            # pakai id percakapan BARU (kontaminasi silang). Sekarang verifikasi
+            # location.href memuat id target dulu sebelum baca DOM; kalau tak
+            # pernah cocok, raise eksplisit (tertangkap except di bawah -> GAGAL
+            # & lanjut, bukan simpan data yang salah).
+            matched = False
+            for att in range(5):
+                time.sleep(9 if att == 0 else 3)
+                console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
+                cur = js_json(client, console,
+                              "window.__rdp_out = JSON.stringify({href: location.href});",
+                              timeout=10)
+                if c["id"] in (cur.get("href") or ""):
+                    matched = True
+                    break
+                log(f"  gemini [{i}/{len(todo)}] tab belum pindah ke {c['id']} (percobaan {att+1}/5)...")
+            if not matched:
+                raise RuntimeError(
+                    f"navigasi ke percakapan {c['id']} gagal diverifikasi - DOM TIDAK dibaca "
+                    "(cegah kontaminasi data lintas-percakapan)")
+
             d = js_json(client, console, r"""
               // DOM Gemini menyisipkan label aksesibilitas di awal tiap
               // pesan ("Anda berkata" / "Gemini berkata", versi Inggris

@@ -325,7 +325,8 @@ def main():
 
         known = {} if a.force else existing_state()
         todo = [c for c in items
-                if a.force or abs(known.get(c["id"], -1) - (to_epoch(c.get("update_time")) or 0)) > 1]
+                if a.force or c["id"] not in known
+                or abs(known[c["id"]] - (to_epoch(c.get("update_time")) or 0)) > 1]
         log(f"{len(todo)} perlu diambil (baru/berubah); diproses maks {a.max_new}")
         todo = todo[:a.max_new]
 
