@@ -73,6 +73,12 @@ TELEGRAM_SCRIPT = os.path.expanduser("~/akses-vps/backup/send-telegram.sh")
 # raw-template/ (manual, isi reproductions/) -- jalur ini pindah target ke
 # audio-template/, CUMA audio, flat 1 file per job (bukan 1 folder/3 file).
 GFOOTAGE_ROOT = "gfootage:audio-template/"
+# (2026-11-03, permintaan user) raw-template/ dulu "manual, bukan ditulis
+# orchestrator" (lihat komentar revisi 31/10 di atas) -- job-1/5/6/7/8/9
+# sampai di sana lewat salin TANGAN (nol jejak di bash_history/git, terbukti
+# saat audit). User minta diotomatiskan: tiap job sukses, folder
+# reproductions/job-<id>/ (9 berkas ir_to_vn.py) di-push APA ADANYA ke sini.
+GFOOTAGE_TEMPLATE_ROOT = "gfootage:raw-template/"
 RAW_WORKDIR = os.path.expanduser("~/viral-pipeline/raw-work")
 RAW_MIN_DISK_MB = 500  # lindungi disk hub (pernah 93% penuh, lihat social-trend-cron.sh)
 
@@ -277,6 +283,34 @@ def build_reproduction(job, analysis):
     log(f"  reproduksi VN (story-script + blueprint) tersimpan: {outdir}/")
     return outdir
 
+def push_reproduction_template(job, outdir):
+    """(2026-11-03, permintaan user, otomatisasi langkah manual) Push folder
+    reproductions/job-<id>/ (9 berkas: .ir.json/.srt/.vn-blueprint.json/
+    .cutlist.txt/.vn-recipe.md/.segments.json/.story-script.md/.pexels-plan.json/
+    .pixabay-plan.json dari build_reproduction()+fetch_and_push_footage()) APA
+    ADANYA ke gfootage:raw-template/job-<id>/ -- "template" = cetak-biru
+    reproduksi siap dipakai manual (beda dari audio-template/ yg cuma MP3
+    bank-suara, dan dari RN7 Movies/Seal/ yg klip stok mentah). Best-effort
+    PENUH sama persis pola build_reproduction()/fetch_and_push_footage()/
+    split_and_push_raw(): job SUDAH 'analyzed' di DB sebelum dipanggil,
+    kegagalan di sini (rclone/exception apa pun) TAK PERNAH menggagalkan job
+    -- fungsi ini TAK PERNAH raise ke pemanggil."""
+    jid = job["id"]
+    if not outdir or not os.path.isdir(outdir):
+        log(f"  (raw-template: {outdir} tak ada, dilewati)")
+        return
+    remote = f"{GFOOTAGE_TEMPLATE_ROOT}job-{jid}/"
+    try:
+        r = subprocess.run(["rclone", "copy", outdir, remote],
+                           capture_output=True, text=True, timeout=180)
+        if r.returncode == 0:
+            log(f"  raw-template -> {remote}")
+        else:
+            log("  (raw-template: rclone copy gagal):", (r.stderr or r.stdout or "").strip()[:200])
+    except Exception as e:
+        log("  (raw-template: exception, dilewati):", repr(e)[:200])
+
+
 def _last_line(r):
     lines = [ln.strip() for ln in (r.stderr or "").splitlines() if ln.strip()]
     return lines[-1] if lines else ""
@@ -475,6 +509,7 @@ def main():
             outdir = build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
             if outdir:
                 fetch_and_push_footage(job, outdir)              # best-effort, tak pernah gagalkan job
+                push_reproduction_template(job, outdir)          # best-effort, tak pernah gagalkan job
             split_and_push_raw(job, relpath, title)              # best-effort, tak pernah gagalkan job
             cleanup(job["id"])
             ok += 1
