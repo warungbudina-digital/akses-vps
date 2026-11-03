@@ -69,11 +69,34 @@ else
   echo "$CS_HOST belum reachable -- lanjut bootstrap via laptop."
 
   echo
-  echo "=== [1/4] Bootstrap via laptop (open-cs.ps1 -Profile $PROFILE) ==="
+  echo "=== [1/4] Bootstrap via laptop (schtasks /run /tn open-cs-$PROFILE) ==="
   echo "(Kalau tab Cloud Shell profil ini SUDAH ada & live, skrip laptop PAKAI ULANG tab itu -- tak selalu buka tab baru.)"
-  ssh ltap-mini "powershell -NoProfile -ExecutionPolicy Bypass -File C:\chrome-cdp\open-cs.ps1 -Profile $PROFILE; echo EXITCODE=\$LASTEXITCODE" 2>&1 \
-    | grep -v '^#<\|^<Objs\|CLIXML'
-  echo "(exit code di atas cuma indikasi KASAR -- lihat catatan di open-and-bootstrap-cs.py; kebenaran = reachable_cs di bawah.)"
+  # (2026-11-03 fix, insiden audit yuni 0/20: SSH biasa TAK membuka window apa pun
+  # di desktop nyata -- terbukti live, os.startfile() di sesi SSH non-interaktif
+  # beda dari sesi logon interaktif yg dipakai NodeDaily-Launcher/task Windows.
+  # Jalur SEBELUMNYA ("ssh ... powershell ... open-cs.ps1") CUMA bisa berhasil
+  # lewat reuse-tab-lama di open-and-bootstrap-cs.py -- kalau profil BELUM punya
+  # tab sama sekali, dulu TAK PERNAH BISA membuka satu. Fix: trigger task Windows
+  # Interactive-only yg sama dipakai laptop sendiri via schtasks /run, BUKAN
+  # panggil powershell/python langsung lewat SSH.)
+  ssh ltap-mini "schtasks /run /tn open-cs-$PROFILE" 2>&1 | grep -v '^#<\|^<Objs\|CLIXML'
+
+  echo
+  echo "=== [1b/4] Tunggu task selesai (schtasks /run return instan, proses asli ~2-3mnt, maks 5mnt) ==="
+  # schtasks /run cuma MEMULAI task, tak nunggu selesai -- kalau langsung lanjut
+  # ke loop reachable 90s di bawah, bisa expired duluan sblm bootstrap sungguhan
+  # tuntas ngetik+apt-get di VM. Poll status task sampai tak lagi "Running".
+  task_done=0
+  for i in $(seq 1 30); do
+    status="$(ssh ltap-mini "schtasks /query /tn open-cs-$PROFILE /fo list" 2>/dev/null | grep -i '^Status:' | awk -F: '{print $2}' | tr -d ' \r')"
+    if [ "$status" != "Running" ]; then task_done=1; break; fi
+    sleep 10
+  done
+  if [ "$task_done" -ne 1 ]; then
+    echo "WARN: task open-cs-$PROFILE masih Running setelah 5mnt -- lanjut cek reachable apa adanya."
+  else
+    echo "OK: task open-cs-$PROFILE selesai (status=$status)."
+  fi
 
   echo
   echo "=== [2/4] Tunggu WireGuard+SSH naik (maks 90s) ==="
