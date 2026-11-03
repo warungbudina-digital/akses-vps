@@ -10,11 +10,29 @@ Dipakai integrasi browser (hulu) atau manual.
 
 category: viral_video | menuju_viral_video
 """
-import sys, re, subprocess, argparse
+import os, sys, re, subprocess, argparse
 from urllib.parse import urlparse, parse_qs
 
 DBVPS = "db-vps"
 CATS  = {"viral_video", "menuju_viral_video"}
+# (2026-11-03, permintaan user "pemisahan permanen") titik masuk antrean
+# memicu run-drain.sh SENDIRI, fire-and-forget -- TAK lagi menunggu cron
+# 10mnt + gerbang-3-profil lama (lihat analyzer-pipeline-trigger.sh).
+RUN_DRAIN = os.path.expanduser("~/viral-pipeline/run-drain.sh")
+
+
+def trigger_drain():
+    """Background, non-blocking -- enqueue.py TAK menunggu drain selesai
+    (bisa makan menit kalau video panjang/ML whisper lambat). run-drain.sh
+    SENDIRI sudah aman no-op diam kalau .50 belum aktif -- gagal di sini
+    (proses tak ketemu dll) TAK PERNAH menggagalkan enqueue."""
+    try:
+        subprocess.Popen(["bash", RUN_DRAIN], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                          start_new_session=True)
+    except Exception as e:
+        print(f"(peringatan: gagal memicu run-drain.sh otomatis: {e!r} -- "
+              f"jalankan manual: bash {RUN_DRAIN})", file=sys.stderr)
 
 def detect(url):
     """(platform, external_id) best-effort dari URL. external_id boleh kosong
@@ -96,6 +114,9 @@ def main():
         sys.exit("enqueue gagal: " + r.stderr.strip()[:300])
     inserted = [x for x in r.stdout.split() if x.strip().isdigit()]
     print(f"ENQUEUE: {len(rows)} diminta -> {len(inserted)} baru, {len(rows) - len(inserted)} duplikat/skip.")
+    if inserted:
+        trigger_drain()
+        print(f"-> run-drain.sh dipicu background (job baru: {', '.join(inserted)}).")
 
 if __name__ == "__main__":
     main()

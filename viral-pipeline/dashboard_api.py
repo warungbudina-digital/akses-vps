@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
-"""dashboard_api.py — backend MINIMAL utk form input URL di pipeline.obc-crypto.com.
+"""dashboard_api.py — backend MINIMAL utk pipeline.obc-crypto.com.
 Terima POST /api/enqueue {url, category, note} -> insert ke media.video_ingest,
 pakai logika SAMA dgn enqueue.py (import langsung, bukan duplikasi regex deteksi
 platform). Tujuan: kurasi pribadi (video hasil pilahan user) jadi gampang masuk
-antrean lewat browser, tanpa buka SSH/CLI -- antrean yg sama dikuras otomatis
-tiap 10mnt oleh analyzer-pipeline-trigger.sh (cron akses-vps) via orchestrator.py.
+antrean lewat browser, tanpa buka SSH/CLI -- job baru memicu run-drain.sh SENDIRI
+(fire-and-forget, lihat trigger_drain() di enqueue.py) begitu masuk, TAK lagi
+menunggu cron 10mnt (analyzer-pipeline-trigger.sh kini cuma jaring-pengaman,
+lihat audit+pemisahan permanen 3/11 di memory project_viral_analyzer.md).
+
+(2026-10-30, permintaan user) GET /api/status -> JSON antrean+hasil TERKINI
+(reuse fetch() dari dashboard.py, SQL sama persis -- jangan duplikasi query).
+Dipakai index.html (dashboard root "/") utk poll tiap beberapa detik & render
+client-side -- dashboard.py (generator HTML statis lama, sekali-jalan sejak
+11/8 tak pernah di-regen ulang) KINI SUPERSEDED utk tampilan; fetch()-nya
+sendiri masih dipakai live di sini. Cache ringan (TTL 2s) supaya poll
+ber-tab-banyak/berbarengan tak membanjiri SSH ke DB-VPS tiap request.
+Endpoint ini TAK pakai token (baca-saja, domain sudah di belakang Cloudflare
+Access -- pola sama /api/health).
 
 Auth: Bearer token (pola sama persis BROWSER_API_KEY punya browser_enqueue.py)
--- WAJIB krn domain publik (Cloudflare di depan pipeline.obc-crypto.com).
-Token dibaca dari ~/.config/viral-dashboard/credentials.env (600).
+-- WAJIB utk /api/enqueue (tulis DB) krn domain publik (Cloudflare di depan
+pipeline.obc-crypto.com). Token dibaca dari ~/.config/viral-dashboard/credentials.env (600).
 
 Jalan di 172.19.0.1:<PORT> (gateway docker akses-vps_app-net -- SAMA pola dgn
 systemd/chrome-vps-tunnel.service: nginx jalan di container, 127.0.0.1 di situ
@@ -17,11 +29,15 @@ reverse-proxy ke sini). TIDAK reachable dari luar host sama sekali.
 
 Env: DASHBOARD_API_PORT (default 8097), DASHBOARD_API_BIND (default 172.19.0.1).
 """
-import json, os, subprocess, sys
+import json, os, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from enqueue import detect, esc, lit, DBVPS, CATS  # reuse, jangan duplikasi
+from enqueue import detect, esc, lit, DBVPS, CATS, trigger_drain  # reuse, jangan duplikasi
+from dashboard import fetch as fetch_status  # reuse SQL+parse, jangan duplikasi
+
+_status_cache = {"t": 0.0, "data": None}
+_STATUS_TTL = 2.0  # detik
 
 BIND = os.getenv("DASHBOARD_API_BIND", "172.19.0.1")
 PORT = int(os.getenv("DASHBOARD_API_PORT", "8097"))
@@ -63,7 +79,9 @@ def insert_url(category, url, note):
         return None, "DB error: " + r.stderr.strip()[:300]
     ids = [x for x in r.stdout.split() if x.strip().isdigit()]
     if ids:
-        return int(ids[0]), None
+        jid = int(ids[0])
+        trigger_drain()  # fire-and-forget, non-blocking -- lihat enqueue.py
+        return jid, None
     return None, "duplikat -- URL ini sudah ada di antrean"
 
 
@@ -107,6 +125,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/health":
             self._send(200, {"ok": True}); return
+        if self.path == "/api/status":
+            now = time.monotonic()
+            if _status_cache["data"] is None or now - _status_cache["t"] > _STATUS_TTL:
+                try:
+                    _status_cache["data"] = fetch_status()
+                    _status_cache["t"] = now
+                except Exception as e:
+                    self._send(502, {"ok": False, "error": f"DB error: {e}"[:300]}); return
+            self._send(200, _status_cache["data"]); return
         self._send(404, {"ok": False, "error": "not found"})
 
     def log_message(self, fmt, *args):
