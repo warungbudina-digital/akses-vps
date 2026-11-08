@@ -124,17 +124,35 @@ fi
 
 echo
 echo "=== [4/4] Verifikasi + pastikan keepalive ping jalan di VM ==="
-ssh "${CS_SSHOPTS[@]}" "$CS_HOST" '
-  if pgrep -f "ping 8.8.8.8" >/dev/null 2>&1; then
-    echo "keepalive SUDAH jalan:"; pgrep -af "ping 8.8.8.8"
+if ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pgrep -af "ping 8.8.8.8"' 2>/dev/null; then
+  echo "keepalive SUDAH jalan."
+else
+  # HARDEN (code-review 2026-11-08): versi lama restart pakai
+  # `setsid bash -c "ping ..." & disown` -- TERLEPAS dari PTY manapun
+  # (terverifikasi live: PPID=1, TTY=?, tak muncul di `who`). Lihat
+  # feedback_cloudshell_key_watchdog_setsid.md: keepalive ini SENGAJA
+  # harus menempel PTY (bukan di-setsid spt key-watchdog) krn Google
+  # butuh ALIRAN DATA TERMINAL supaya sesi tak dianggap idle -- proses
+  # yg lepas dr PTY cuma ngirim ICMP sendirian, percuma utk tujuan ini.
+  # Fix: `ssh -tt` dari HUB memaksa alokasi PTY ASLI di VM (ping jadi
+  # foreground sungguhan di PTY itu, bukan di-background/di-setsid);
+  # koneksi SSH-nya sendiri yg di-nohup+disown di sisi HUB (BUKAN di
+  # sisi VM) supaya PTY & ping-nya bertahan sesudah skrip ini selesai --
+  # PTY otomatis mati kalau koneksi SSH ini ditutup (sama persis pola
+  # "harus ada yg menjaga" dgn tab browser aslinya).
+  echo "keepalive TAK ditemukan -- restart MENEMPEL PTY (via ssh -tt dari hub, bukan setsid)..."
+  ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pkill -f "ping 8.8.8.8" 2>/dev/null; true'
+  KA_LOG="/tmp/cs-keepalive-ssh-${PROFILE}.log"
+  nohup ssh -tt "${CS_SSHOPTS[@]}" "$CS_HOST" 'ping 8.8.8.8' \
+    >"$KA_LOG" 2>&1 </dev/null &
+  disown
+  sleep 2
+  if ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pgrep -af "ping 8.8.8.8"' 2>/dev/null; then
+    echo "keepalive RESTART OK (menempel PTY baru, log hub: $KA_LOG)."
   else
-    echo "keepalive TAK ditemukan -- restart..."
-    pkill -f "ping 8.8.8.8" 2>/dev/null
-    setsid bash -c "ping 8.8.8.8 >/tmp/keepalive-ping.log 2>&1 </dev/null" & disown
-    sleep 1
-    pgrep -af "ping 8.8.8.8" && echo "keepalive RESTART OK" || echo "keepalive GAGAL direstart"
+    echo "keepalive GAGAL direstart."
   fi
-'
+fi
 
 echo
 echo "=== SELESAI: $PROFILE (deploy_rc=$deploy_rc) ==="
