@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual Fetch Footage — viral pipeline</title>
+<style>
+:root{
+ --plane:#f9f9f7; --surf:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --mut:#898781;
+ --grid:#e1e0d9; --border:rgba(11,11,11,.10); --accent:#2a78d6;
+ --good:#0ca30c; --warn:#fab219; --bad:#e34948;
+}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme=light])){
+ --plane:#0d0d0d; --surf:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --mut:#898781;
+ --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
+}}
+:root[data-theme=dark]{
+ --plane:#0d0d0d; --surf:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --mut:#898781;
+ --grid:#2c2c2a; --border:rgba(255,255,255,.10); --accent:#3987e5;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+ font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5;
+ -webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding:28px 16px 64px}
+h1{font-size:19px;margin:0 0 4px}
+.mut{color:var(--mut)}
+p.sub{color:var(--mut);font-size:13px;margin:0 0 20px}
+label{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
+select,input[type=text],input[type=password]{
+ width:100%;padding:9px 11px;background:var(--surf);border:1px solid var(--border);
+ border-radius:8px;color:var(--ink);font-size:14px;font-family:inherit}
+button{margin-top:14px;padding:10px 16px;border:none;border-radius:8px;
+ background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+button.secondary{background:var(--surf);color:var(--ink);border:1px solid var(--border)}
+button:disabled{opacity:.5;cursor:default}
+details{margin-top:20px;color:var(--mut);font-size:13px}
+.phase{background:var(--surf);border:1px solid var(--border);border-radius:10px;
+ padding:12px 14px;margin-bottom:10px}
+.phase-head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+.phase-i{font-weight:700;font-size:13px}
+.phase-dur{font-size:12px;color:var(--mut)}
+.phase-sem{font-size:12px;color:var(--ink2)}
+.phase-babak{font-size:12px;color:var(--mut);margin:4px 0 8px;white-space:pre-wrap;
+ max-height:0;overflow:hidden;transition:max-height .2s}
+.phase-babak.open{max-height:320px;overflow-y:auto}
+.toggle-babak{font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;margin-left:6px}
+.pill.good{background:rgba(12,163,12,.12);color:var(--good)}
+.pill.warn{background:rgba(250,178,25,.16);color:#a06600}
+.pill.bad{background:rgba(227,73,72,.14);color:var(--bad)}
+.pill.muted{background:var(--grid);color:var(--ink2)}
+.phase-row{display:flex;align-items:center;gap:8px}
+.phase-row input[type=text]{flex:1}
+#msg{margin-top:14px;font-size:14px;padding:10px 12px;border-radius:8px;display:none}
+#msg.ok{display:block;background:rgba(12,163,12,.10);color:var(--good);border:1px solid rgba(12,163,12,.3)}
+#msg.err{display:block;background:rgba(227,73,72,.12);color:var(--bad);border:1px solid rgba(227,73,72,.3)}
+#banner{display:none;margin:16px 0;padding:12px 14px;border-radius:8px;
+ background:rgba(250,178,25,.14);border:1px solid rgba(250,178,25,.35);font-size:13px}
+footer{margin-top:28px;padding-top:14px;border-top:1px solid var(--border);font-size:11.5px;color:var(--mut)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Manual Fetch Footage</h1>
+  <p class="sub">Download footage otomatis dimatikan — pilih job, edit keyword per fase kalau query
+    otomatis tak relevan, baru fetch+push ke RN7 (<code>Movies/Seal/</code>) dijalankan.</p>
+
+  <label for="job">Job</label>
+  <select id="job"><option value="">Memuat daftar job…</option></select>
+
+  <div id="banner"></div>
+  <div id="phases"></div>
+
+  <div id="actions" style="display:none">
+    <button id="btnStart">Mulai fetch</button>
+    <button id="btnResume" class="secondary" style="display:none">Lanjutkan</button>
+  </div>
+  <div id="msg"></div>
+
+  <details>
+    <summary>Token akses</summary>
+    <label for="token">Bearer token (sama dgn halaman input URL, disimpan di browser ini saja)</label>
+    <input type="password" id="token" placeholder="tempel token sekali, lalu tersimpan">
+  </details>
+
+  <footer>Fetch nyata (unduh+push RN7) dilakukan chunk per 5 fase, disk-guard aktif.
+    Lihat <a href="/">dashboard</a> · <a href="/input.html">input URL baru</a>.</footer>
+</div>
+
+<script>
+(function () {
+  var TOKEN_KEY = "viral_dashboard_token";
+  var tokenEl = document.getElementById("token");
+  try { tokenEl.value = localStorage.getItem(TOKEN_KEY) || ""; } catch (e) {}
+  tokenEl.addEventListener("change", function () {
+    try { localStorage.setItem(TOKEN_KEY, tokenEl.value.trim()); } catch (e) {}
+  });
+
+  function token() { return tokenEl.value.trim(); }
+  function authHeaders(extra) {
+    var h = { "Authorization": "Bearer " + token() };
+    if (extra) for (var k in extra) h[k] = extra[k];
+    return h;
+  }
+  function esc(v) {
+    v = (v === null || v === undefined) ? "" : String(v);
+    return v.replace(/[&<>"']/g, function (c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
+  function showMsg(text, ok) {
+    var m = document.getElementById("msg");
+    m.textContent = text; m.className = ok ? "ok" : "err";
+  }
+
+  var jobSel = document.getElementById("job");
+  var phasesEl = document.getElementById("phases");
+  var actionsEl = document.getElementById("actions");
+  var bannerEl = document.getElementById("banner");
+  var btnStart = document.getElementById("btnStart");
+  var btnResume = document.getElementById("btnResume");
+  var currentJobId = null;
+  var currentPhases = [];   // [{i, dur_sec, semantic, auto_query, babak_title, babak_text}]
+  var pollTimer = null;
+  var lastPayload = null;   // {overrides, phases} -- dipakai tombol Lanjutkan
+
+  var PHASE_PILL = {
+    pending: ["muted", "menunggu"], awaiting_push: ["warn", "diunduh, menunggu push"],
+    pushed: ["good", "terkirim ke RN7"], empty: ["bad", "0 hasil"],
+    too_large: ["bad", "semua kandidat > cap"],
+    disk_guard: ["bad", "disk penuh"], error: ["bad", "error"],
+  };
+
+  function loadJobs() {
+    if (!token()) {
+      jobSel.innerHTML = '<option value="">Isi token dulu</option>';
+      return;
+    }
+    fetch("/api/manual-fetch/jobs", { headers: authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { jobSel.innerHTML = '<option value="">' + esc(d.error || "gagal") + '</option>'; return; }
+        jobSel.innerHTML = '<option value="">— pilih job —</option>' + d.jobs.map(function (j) {
+          var st = j.manual_status ? " [" + j.manual_status + "]" : "";
+          return '<option value="' + j.job_id.replace(/^job-/, "") + '">' +
+                 esc(j.job_id) + " · " + j.n_phases + " fase" + esc(st) + "</option>";
+        }).join("");
+      })
+      .catch(function (e) { jobSel.innerHTML = '<option value="">gagal konek: ' + esc(e.message) + '</option>'; });
+  }
+
+  function renderPhases() {
+    phasesEl.innerHTML = currentPhases.map(function (p) {
+      return '<div class="phase" data-i="' + p.i + '">' +
+        '<div class="phase-head">' +
+          '<span class="phase-i">Fase ' + p.i + '</span>' +
+          '<span class="phase-dur">' + p.dur_sec + 's</span>' +
+          '<span class="phase-sem">' + esc(p.semantic || "") + '</span>' +
+          '<span class="pill outcome" data-i="' + p.i + '"></span>' +
+        '</div>' +
+        (p.babak_title ? '<div class="toggle-babak">lihat konteks babak: ' + esc(p.babak_title) + '</div>' : '') +
+        '<div class="phase-babak">' + esc(p.babak_text || "") + '</div>' +
+        '<div class="phase-row">' +
+          '<label style="width:60px;margin:0;flex-shrink:0">keyword</label>' +
+          '<input type="text" class="q" data-i="' + p.i + '" data-auto="' + esc(p.auto_query) + '" value="' + esc(p.current_query) + '">' +
+        '</div>' +
+      '</div>';
+    }).join("") || '<p class="mut">Job ini tak punya fase.</p>';
+
+    Array.prototype.forEach.call(phasesEl.querySelectorAll(".toggle-babak"), function (el) {
+      el.addEventListener("click", function () {
+        el.nextElementSibling.classList.toggle("open");
+      });
+    });
+    actionsEl.style.display = currentPhases.length ? "block" : "none";
+  }
+
+  function loadJobDetail(numId) {
+    phasesEl.innerHTML = '<p class="mut">Memuat…</p>';
+    bannerEl.style.display = "none";
+    document.getElementById("msg").style.display = "none";
+    fetch("/api/manual-fetch/jobs/" + numId, { headers: authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { phasesEl.innerHTML = '<p class="mut">' + esc(d.error) + '</p>'; return; }
+        currentJobId = numId;
+        currentPhases = d.job.phases;
+        renderPhases();
+        pollStatus(numId, true);
+      })
+      .catch(function (e) { phasesEl.innerHTML = '<p class="mut">gagal konek: ' + esc(e.message) + '</p>'; });
+  }
+
+  jobSel.addEventListener("change", function () {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    if (jobSel.value) loadJobDetail(jobSel.value);
+    else { phasesEl.innerHTML = ""; actionsEl.style.display = "none"; bannerEl.style.display = "none"; }
+  });
+
+  function collectPayload(phasesOnly) {
+    // Baca NILAI INPUT SAAT INI (bukan payload lama) -- "Lanjutkan" lewat
+    // sini jg, supaya keyword yg sudah diketik user TAK PERNAH hilang
+    // (temuan: kirim overrides={} saat resume bikin fase stuck balik ke
+    // auto_query, persis yg fitur ini mau hindari).
+    var overrides = {};
+    Array.prototype.forEach.call(phasesEl.querySelectorAll("input.q"), function (el) {
+      var v = el.value.trim();
+      if (v && v !== el.getAttribute("data-auto")) overrides[el.getAttribute("data-i")] = v;
+    });
+    var payload = { overrides: overrides };
+    if (phasesOnly) payload.phases = phasesOnly;
+    return payload;
+  }
+
+  function startFetch(payload) {
+    lastPayload = payload;
+    btnStart.disabled = true; btnResume.disabled = true;
+    // Feedback LANGSUNG saat klik -- backend cek RN7 reachable dulu (adb
+    // connect+devices, bisa sampai ~30dtk kalau RN7 lambat/Doze) SEBELUM
+    // respons apa pun balik. Tanpa baris ini tombol cuma diam keabuan
+    // selama itu, terlihat seperti "tak ada reaksi" (temuan user 6/11).
+    showMsg("Memulai... (cek RN7 dulu, bisa sampai ~30 detik)", true);
+    fetch("/api/manual-fetch/jobs/" + currentJobId + "/start", {
+      method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+      .then(function (res) {
+        btnStart.disabled = false; btnResume.disabled = false;
+        if (res.status === 202) { showMsg("Fetch dimulai, memantau status…", true); pollStatus(currentJobId); return; }
+        if (res.status === 200 && res.body.ok) { showMsg(res.body.message, true); return; }
+        if (res.status === 409) { showMsg("Ada run lain sedang jalan: " + res.body.error, false); return; }
+        if (res.status === 507) { showMsg("Disk hub tak cukup: " + res.body.error, false); return; }
+        if (res.status === 503) { showMsg("RN7 tak terjangkau: " + res.body.error, false); return; }
+        showMsg(res.body.error || "gagal (tak diketahui)", false);
+      })
+      .catch(function (e) { btnStart.disabled = false; btnResume.disabled = false; showMsg("Gagal kontak server: " + e, false); });
+  }
+
+  btnStart.addEventListener("click", function () { startFetch(collectPayload()); });
+  btnResume.addEventListener("click", function () {
+    if (lastPayload) startFetch(collectPayload(lastPayload.phases));
+  });
+
+  function renderOutcomes(statusPhases) {
+    statusPhases = statusPhases || {};
+    Array.prototype.forEach.call(phasesEl.querySelectorAll(".outcome"), function (el) {
+      var st = statusPhases[el.getAttribute("data-i")];
+      var info = PHASE_PILL[st];
+      if (!info) { el.textContent = ""; el.className = "pill outcome"; return; }
+      el.className = "pill outcome " + info[0];
+      el.textContent = info[1];
+    });
+  }
+
+  function pollStatus(numId, once) {
+    fetch("/api/manual-fetch/jobs/" + numId + "/status", { headers: authHeaders() })
+      .then(function (r) { if (r.status === 404) return null; return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        var s = d.status;
+        renderOutcomes(s.phases);
+        if (s.state === "running") {
+          bannerEl.style.display = "none";
+          // Progres NYATA (chunk X/Y) -- dulu pesan ini diam sama persis
+          // dari klik sampai selesai (bisa 1-5mnt utk banyak fase), terlihat
+          // macet walau backend jalan normal di background (temuan 6/11).
+          showMsg("Fetch berjalan: chunk " + (s.chunks_done || 0) + "/" + (s.chunks_total || "?") +
+                  "... (unduh+push ke RN7)", true);
+          pollTimer = setTimeout(function () { pollStatus(numId); }, 3000);
+          return;
+        }
+        if (s.state === "paused_rn7_offline" || s.state === "interrupted") {
+          bannerEl.style.display = "block";
+          bannerEl.textContent = s.message || "Berhenti sementara.";
+          btnResume.style.display = "inline-block";
+          lastPayload = { phases: s.target_phases };
+          return;
+        }
+        if (s.state === "done") {
+          bannerEl.style.display = "none";
+          showMsg(s.message || "Selesai.", true);
+          return;
+        }
+        if (s.state === "done_partial") {
+          bannerEl.style.display = "block";
+          bannerEl.textContent = s.message || "Sebagian fase belum terkirim.";
+          btnResume.style.display = "inline-block";
+          lastPayload = { phases: s.target_phases };
+          return;
+        }
+        if (s.state === "error") {
+          bannerEl.style.display = "block";
+          bannerEl.textContent = "Error: " + (s.message || "");
+          return;
+        }
+      })
+      .catch(function () { /* diam, coba lagi poll berikutnya */ });
+  }
+
+  loadJobs();
+})();
+</script>
+</body>
+</html>

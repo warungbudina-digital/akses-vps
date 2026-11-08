@@ -41,13 +41,18 @@ import urllib.parse
 from datetime import datetime, timezone
 
 from stock_common import (
+    ClipTooLargeError,
     DEFAULT_FALLBACK,
+    DiskGuardError,
+    PER_CLIP_CAP_MB,
     download,
     load_key as _load_key,
+    load_queries_file,
     make_log,
+    parse_exclude_ids,
     pick_video,
     ratio_to_orientation,
-    semantic_to_query,
+    resolve_query,
 )
 
 API_BASE = "https://pixabay.com/api/videos/"
@@ -109,7 +114,16 @@ def main():
     ap.add_argument("--sleep", type=float, default=0.7,
                     help="jeda antar-request (Pixabay 100 req/menit, lebih ketat dr Pexels)")
     ap.add_argument("--dry-run", action="store_true", help="cari+rencana saja, tanpa unduh")
+    ap.add_argument("--queries-file", help="path JSON override query manual per fase "
+                     '{"<idx 0-based>": "keyword", ...} -- menang atas semantic_to_query() otomatis')
+    ap.add_argument("--phases", help="indeks fase 0-based dipisah koma utk dibatasi run ini "
+                     '(mis. "3,7,12") -- default semua fase di blueprint')
+    ap.add_argument("--exclude-ids", help="video id dipisah koma utk DIHINDARI (dedup lintas-"
+                     "panggilan -- manual_fetch_api.py isi ini dari master plan sblm tiap chunk)")
     a = ap.parse_args()
+
+    overrides = load_queries_file(a.queries_file) if a.queries_file else {}
+    phase_filter = set(int(x) for x in a.phases.split(",")) if a.phases else None
 
     key = load_key()
     if not key:
@@ -135,59 +149,95 @@ def main():
     log(f"orientasi={orientation} (dari '{hint}') · {len(phases)} fase · cache={a.cache}"
         + (" · DRY-RUN" if a.dry_run else ""))
 
-    used_ids = set()
+    used_ids = parse_exclude_ids(a.exclude_ids)
     out_phases = []
     attributions = []
     errors = 0
 
     for i, p in enumerate(phases):
+        if phase_filter is not None and i not in phase_filter:
+            continue
         sem = p.get("semantic")
         need = float(p.get("dur_sec") or max(0.0, (p.get("end", 0) - p.get("start", 0))))
-        query = semantic_to_query(sem)
+        is_override = i in overrides
+        query = resolve_query(sem, i, overrides)
         entry = {"i": i, "start": p.get("start"), "end": p.get("end"),
                  "dur_sec": round(need, 2), "semantic": sem, "query": query,
+                 "query_is_override": is_override,
                  "pixabay_video_id": None, "local_path": None, "status": "empty"}
+        skip_too_large = set()  # id video yg kelebihan cap/tanpa kualitas cocok, DI FASE INI SAJA
+        placed = False
         try:
             hits = pixabay_search(key, query, a.per_page)
             if not hits and query != DEFAULT_FALLBACK:
+                if is_override:
+                    log(f"  fase{i} override '{query}': 0 hasil (tak di-fallback)")
+                    out_phases.append(entry)
+                    continue
                 # fallback query generik kalau semantic tak menghasilkan apa-apa
                 entry["query_fallback"] = DEFAULT_FALLBACK
                 hits = pixabay_search(key, DEFAULT_FALLBACK, a.per_page)
-            vid = pick_video(hits, need, used_ids)
-            if not vid:
+            if not hits:
                 log(f"  fase{i} '{query}': 0 hasil")
                 out_phases.append(entry)
                 continue
-            used_ids.add(vid["id"])
-            f = pick_file(vid, orientation, a.max_height)
-            if not f:
-                log(f"  fase{i} id={vid['id']}: tak ada kualitas video cocok")
-                out_phases.append(entry)
-                continue
-            photographer = vid.get("user")
-            entry.update({
-                "pixabay_video_id": vid["id"], "pixabay_url": vid.get("pageURL"),
-                "photographer": photographer, "clip_dur": vid.get("duration"),
-                "file": {"w": f["width"], "h": f["height"], "size": f.get("size"),
-                         "link": f["url"]},
-                "status": "planned",
-            })
-            attributions.append({"video_id": vid["id"], "photographer": photographer,
-                                 "url": vid.get("pageURL")})
-            if not a.dry_run:
+
+            # Coba kandidat berturut-turut: ClipTooLargeError -> klip INI dilewati,
+            # cari video lain (BUKAN hentikan fase) -- sama pola pexels_fetch.py.
+            while True:
+                vid = pick_video(hits, need, used_ids | skip_too_large)
+                if not vid or vid["id"] in skip_too_large:
+                    break
+                f = pick_file(vid, orientation, a.max_height)
+                if not f:
+                    skip_too_large.add(vid["id"])
+                    continue
+                photographer = vid.get("user")
+                file_entry = {"w": f["width"], "h": f["height"], "size": f.get("size"), "link": f["url"]}
+                if a.dry_run:
+                    entry.update({"pixabay_video_id": vid["id"], "pixabay_url": vid.get("pageURL"),
+                                  "photographer": photographer, "clip_dur": vid.get("duration"),
+                                  "file": file_entry, "status": "planned"})
+                    attributions.append({"video_id": vid["id"], "photographer": photographer,
+                                         "url": vid.get("pageURL")})
+                    used_ids.add(vid["id"])
+                    log(f"  fase{i} '{query}' -> id={vid['id']} {f['width']}x{f['height']} (dry)")
+                    placed = True
+                    break
                 dest = os.path.join(a.cache, f"pixabay_{vid['id']}_{f['height']}.mp4")
-                if os.path.isfile(dest) and os.path.getsize(dest) > 0:
-                    entry["local_path"] = dest
-                    entry["status"] = "cached"
-                    log(f"  fase{i} '{query}' -> id={vid['id']} {f['width']}x{f['height']} (cache)")
+                try:
+                    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+                        sz, status = os.path.getsize(dest), "cached"
+                    else:
+                        sz, status = download(f["url"], dest), "downloaded"
+                except ClipTooLargeError as e:
+                    skip_too_large.add(vid["id"])
+                    log(f"  fase{i} id={vid['id']} {f['height']}p: {e} -- coba kandidat lain")
+                    continue
+                entry.update({"pixabay_video_id": vid["id"], "pixabay_url": vid.get("pageURL"),
+                              "photographer": photographer, "clip_dur": vid.get("duration"),
+                              "file": file_entry, "local_path": dest, "status": status})
+                attributions.append({"video_id": vid["id"], "photographer": photographer,
+                                     "url": vid.get("pageURL")})
+                used_ids.add(vid["id"])
+                log(f"  fase{i} '{query}' -> id={vid['id']} {f['width']}x{f['height']} "
+                    f"{sz//1024}KB ({status})")
+                placed = True
+                break
+
+            if not placed:
+                if skip_too_large:
+                    entry["status"] = "too_large"
+                    entry["error"] = f"{len(skip_too_large)} kandidat dilewati (semua > cap {PER_CLIP_CAP_MB}MB)"
+                    log(f"  fase{i} '{query}': {entry['error']}")
                 else:
-                    sz = download(f["url"], dest)
-                    entry["local_path"] = dest
-                    entry["status"] = "downloaded"
-                    log(f"  fase{i} '{query}' -> id={vid['id']} {f['width']}x{f['height']} "
-                        f"{sz//1024}KB")
-            else:
-                log(f"  fase{i} '{query}' -> id={vid['id']} {f['width']}x{f['height']} (dry)")
+                    log(f"  fase{i} '{query}': tak ada kandidat cocok")
+        except DiskGuardError as e:
+            entry["status"] = "disk_guard"
+            entry["error"] = str(e)
+            log(f"  fase{i} DISK GUARD: {e} -- hentikan sisa fase run ini")
+            out_phases.append(entry)
+            break
         except Exception as e:
             errors += 1
             entry["status"] = "error"

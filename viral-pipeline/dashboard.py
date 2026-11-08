@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """dashboard.py - tarik media.* (antrean+hasil viral_analyzer) dari DB-VPS -> HTML
 self-contained (CSP-safe), gaya visual sama dengan ~/analytics/dashboard.py.
-Output: /home/warungbudina/viral-pipeline/dashboard.html . Ringan (VPS-light)."""
+Output: /home/warungbudina/viral-pipeline/dashboard.html . Ringan (VPS-light).
+
+(2026-10-30) SUPERSEDED utk tampilan publik: dibuat sekali 11/8, tak pernah
+di-regen ulang sejak itu (nol cron) -> index.html di pipeline.obc-crypto.com
+jadi beku ~2.5 bulan. Diganti halaman client-side yg poll live ke endpoint
+GET /api/status (dashboard_api.py) -- lihat nginx/dashboards/pipeline/index.html.
+fetch() di file ini TETAP dipakai (reused langsung) sbg sumber data /api/status,
+jangan dihapus; main()/render() di bawah kini cuma riwayat/CLI manual (`python3
+dashboard.py` masih bisa jalan, hasilnya dashboard.html lokal, tak lagi dipakai
+di produksi)."""
 import os, sys, json, subprocess, html
 
 HERE = os.path.dirname(os.path.abspath(__file__))

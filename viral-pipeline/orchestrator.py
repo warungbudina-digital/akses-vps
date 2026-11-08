@@ -294,7 +294,12 @@ def push_reproduction_template(job, outdir):
     PENUH sama persis pola build_reproduction()/fetch_and_push_footage()/
     split_and_push_raw(): job SUDAH 'analyzed' di DB sebelum dipanggil,
     kegagalan di sini (rclone/exception apa pun) TAK PERNAH menggagalkan job
-    -- fungsi ini TAK PERNAH raise ke pemanggil."""
+    -- fungsi ini TAK PERNAH raise ke pemanggil.
+
+    (2026-11-04) Sejak fetch_and_push_footage() jadi --dry-run permanen,
+    .pexels-plan.json/.pixabay-plan.json yg ikut terpush ke sini bisa tanpa
+    local_path (fase status "planned", belum diunduh) -- harmless, plan tetap
+    berguna sbg referensi query utk manual_fetch_api.py."""
     jid = job["id"]
     if not outdir or not os.path.isdir(outdir):
         log(f"  (raw-template: {outdir} tak ada, dilewati)")
@@ -332,39 +337,30 @@ def fetch_and_push_footage(job, outdir):
         log(f"  (footage: {os.path.basename(blueprint)} tak ada, dilewati)")
         return
 
+    # (2026-11-04, permintaan user) Query auto dari semantic label sering tak
+    # relevan dgn analisa video -- download otomatis DIMATIKAN PERMANEN.
+    # pexels_fetch.py/pixabay_fetch.py tetap jalan via --dry-run: plan JSON
+    # (query per fase) tetap ditulis sbg data utk UI manual, TAPI nol klip
+    # diunduh & push_raw_footage.py TAK dipanggil sama sekali di sini lagi.
+    # Fetch+push NYATA kini lewat manual_fetch_api.py/manual-fetch.html
+    # (lihat plan crispy-mapping-cherny.md), dipicu manual oleh user stlh
+    # review .story-script.md, bukan otomatis per job lagi.
     plans = []
     for name, script in (("pexels", PEXELS_FETCH), ("pixabay", PIXABAY_FETCH)):
-        r = sh_safe(["python3", script, blueprint], timeout=FOOTAGE_TIMEOUT)
+        r = sh_safe(["python3", script, blueprint, "--dry-run"], timeout=FOOTAGE_TIMEOUT)
         plan_path = f"{base}.{name}-plan.json"
         if r.returncode == 0 and os.path.isfile(plan_path):
             plans.append(plan_path)
-            log(f"  footage {name}: {_last_line(r)[:150]}")
+            log(f"  footage {name} (dry-run, plan saja): {_last_line(r)[:150]}")
         else:
             log(f"  (footage {name}: gagal/skip, rc={r.returncode}):",
                 (_last_line(r) or r.stdout or "")[-200:])
 
     if not plans:
-        log("  (footage: tak ada plan yg berhasil, push ke Gdrive dilewati)")
+        log("  (footage: tak ada plan yg berhasil)")
         return
 
-    # (2026-10-29) FIX bug nyata job-5: dulu SATU panggilan push_raw_footage.py
-    # dgn SEMUA plans sekaligus berbagi SATU budget FOOTAGE_TIMEOUT -- job dgn
-    # banyak/klip besar (job-5: 13 fase x 2 provider, salah satunya 122MB) bisa
-    # timeout di tengah upload provider kedua PADAHAL provider pertama sudah
-    # sukses penuh (lihat ~/viral-drain.log baris 655). Akibatnya klip provider
-    # kedua TAK sampai Gdrive secara SENYAP (job tetap 'analyzed', nol tanda
-    # merah di DB -- lihat memori feedback_kegagalan_menyamar_sukses). Fix:
-    # panggil push_raw_footage.py TERPISAH per plan/provider, masing-masing
-    # dpt budget FOOTAGE_TIMEOUT PENUH sendiri -- timeout provider A tak lagi
-    # memotong jatah provider B.
-    for plan_path in plans:
-        r = sh_safe(["python3", PUSH_RAW_FOOTAGE, plan_path], timeout=FOOTAGE_TIMEOUT)
-        fname = os.path.basename(plan_path)
-        if r.returncode != 0:
-            log(f"  (footage: push_raw_footage.py gagal utk {fname}, klip TETAP lokal di hub, tak sampai RN7):",
-                (_last_line(r) or r.stdout or "")[-200:])
-        else:
-            log(f"  footage -> RN7 Movies/Seal/ (prefix job-{jid}_, {fname}):", _last_line(r)[:150])
+    log("  (footage: dry-run plan only, fetch+push kini manual -- lihat manual-fetch.html)")
 
 def disk_avail_mb(path="/"):
     try:
