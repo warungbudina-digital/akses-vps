@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Panen percakapan SEMUA asisten AI web di RN7 -> Postgres `ai_chatlog` (DB-VPS).
-Sumber: chatgpt | claude | gemini. Menggantikan harvest-rn7-chatgpt.py yg
-hanya menangani 1 sumber (file itu tetap ada & dipakai ulang sbg pustaka -
+Panen percakapan asisten AI web di RN7 -> Postgres `ai_chatlog` (DB-VPS).
+Sumber: chatgpt | claude. Menggantikan harvest-rn7-chatgpt.py yg hanya
+menangani 1 sumber (file itu tetap ada & dipakai ulang sbg pustaka -
 lihat impor di bawah, jadi logika DB/RDP tidak diduplikasi).
 
 KENAPA TIAP SUMBER BEDA CARA (hasil probe langsung 2026-09-13):
@@ -10,29 +10,24 @@ KENAPA TIAP SUMBER BEDA CARA (hasil probe langsung 2026-09-13):
   - claude : JUGA punya API bersih -> /api/organizations/<org>/chat_conversations
              (+ detail `?tree=True&rendering_mode=messages`). Cukup cookie,
              TANPA Bearer. Peran pesan sudah terlabel di JSON.
-  - gemini : TIDAK punya API yg bisa dipakai -> terpaksa DOM.
-             ⚠️ Jebakan yg memakan waktu: tombol pembuka daftar riwayat itu
-             `[aria-label="Menu utama"]`. Tombol `side-nav-sparkle-button`
-             ("Buka sidebar") TAMPAK benar tapi TIDAK memunculkan seksi
-             "Terbaru" - sempat menyesatkan sampai dikira akunnya kosong.
-             Setelah menu utama dibuka: `a[href^="/app/"]` = daftar
-             percakapan (href -> id, teks -> judul). Isi percakapan dibaca
-             dr `user-query` (giliran user) & `model-response` (giliran AI).
 
-CATATAN ISI AKUN saat dibangun: chatgpt 19 percakapan, claude 0, gemini 0
-(lalu 1 setelah percakapan uji dibuat). Adapter claude/gemini sengaja tetap
-dibuat walau kosong supaya percakapan BARU otomatis ikut terpanen.
+CATATAN ISI AKUN saat dibangun: chatgpt 19 percakapan, claude 0. Adapter
+claude sengaja tetap dibuat walau kosong supaya percakapan BARU otomatis
+ikut terpanen.
 
-⚠️ Gemini JAUH lebih lambat & rapuh drpd 2 lainnya (buka tiap percakapan satu
-per satu di browser sungguhan, bukan 1 panggilan API) - karena itu ada
-`--max-new` terpisah dan kegagalan 1 percakapan tidak menggagalkan sisanya.
+⚠️ GEMINI DIHAPUS PERMANEN 2026-11-08: RN7 TAK PERNAH login akun Google di
+perangkatnya - bukan soal kalibrasi/timing, adapter gemini (DOM-scraping +
+fallback real-tap OS-level) SELALU gagal buka drawer riwayat, diverifikasi
+ulang 8/11 (koordinat tap terbukti presisi lewat pengukuran screenshot,
+tapi drawer tetap tak pernah terbuka). Bukan kegagalan sementara yg bisa
+diperbaiki kalibrasi ulang -> dihapus drpd terus gagal tiap hari. Riwayat
+implementasi lama: lihat `harvest-rn7-ai.py.bak-20260920` / git log.
 """
 import argparse
 import importlib.util
 import json
 import os
 import sys
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -44,8 +39,7 @@ cg = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cg)
 
 log, to_epoch, psql, load_payload = cg.log, cg.to_epoch, cg.psql, cg.load_payload
-ensure_rdp, js_json, sh = cg.ensure_rdp, cg.js_json, cg.sh
-ADB, RN7, FENNEC, RDP_PORT = cg.ADB, cg.RN7, cg.FENNEC, cg.RDP_PORT
+ensure_rdp, js_json, RDP_PORT = cg.ensure_rdp, cg.js_json, cg.RDP_PORT
 # (code-review fix #11) open_tab dipindah ke harvest-rn7-chatgpt.py supaya
 # main() standalone skrip itu JUGA dapat hardening retry/poll yg sama --
 # dulu ada 2 implementasi (satu di-harden di sini, satu lama di sana).
@@ -150,282 +144,6 @@ def harvest_claude(client, max_new, force, known, skip):
     return out
 
 
-# ----------------------------- GEMINI ------------------------------
-
-def _gemini_sidebar_tap_fallback():
-    """Fallback kalau klik sintetis RDP gagal buka drawer riwayat Gemini.
-
-    (Diselidiki+diverifikasi 2026-11-01) UI mobile Gemini (mat-drawer-over)
-    MENOLAK event sintetis (.click()/dispatchEvent MouseEvent penuh) secara
-    KONSISTEN di build ini -- bukan kadang gagal, tapi selalu. Tapi event
-    sentuh OS-level ASLI via `adb shell input tap` di titik koordinat yg
-    SAMA PERSIS BERHASIL membuka drawer, diverifikasi 3x (2x langsung
-    berturut, 1x lagi setelah reload bersih + RN7 sempat offline & online
-    kembali -- konsisten tiap kali layar dlm keadaan AWAKE).
-
-    Koordinat dikalibrasi EMPIRIS khusus RN7 (1080x2340 fisik): diukur dari
-    getBoundingClientRect() elemen acuan (tombol close drawer & teks judul
-    percakapan) dibandingkan posisi piksel asli di screenshot, menghasilkan
-    physical_px = css_px * devicePixelRatio(~2.61) + offset_chrome(~247, tinggi
-    URL-bar Fennec yg TAK bisa dihitung dari JS/CSS - browser sengaja tak
-    expose tinggi chrome native ke web content). Kalau Gemini/Fennec ganti
-    layout drawer-opener di masa depan & fallback ini mulai gagal lagi:
-    screenshot ulang + getBoundingClientRect() elemen acuan, lalu hitung ulang
-    dgn rumus yg sama -- JANGAN asal tebak koordinat baru.
-
-    JEBAKAN NYATA (ditemukan 2026-11-01 saat run gabungan 3-source): `adb
-    shell input tap` beroperasi di tab Fennec yg SEDANG TAMPIL DI LAYAR FISIK
-    -- BUKAN tab yg sedang "di-attach" via RDP. attach_tab() cuma mengganti
-    konteks JS yg dieksekusi, TAK memaksa Android menampilkan tab itu di
-    layar. Kalau chatgpt/claude dipanen duluan (biasa, krn ADAPTERS jalan
-    berurutan), layar fisik MASIH nampilin tab terakhir mereka saat giliran
-    gemini tiba -- tap salah sasaran (pernah nyasar ke drawer Claude, untung
-    tak merusak apa pun, tapi gemininya sendiri tetap gagal dibaca). Fix:
-    paksa tab Gemini ke foreground LAYAR FISIK dulu via intent VIEW yg sama
-    dipakai open_tab() utk buka tab baru -- Fennec mengenali URL yg cocok
-    tab yg sudah ada & PINDAH ke situ (bukan bikin tab baru), baru setelah
-    itu tap koordinatnya valid."""
-    sh([ADB, "-s", RN7, "shell", "input keyevent KEYCODE_WAKEUP"])
-    time.sleep(0.5)
-    sh([ADB, "-s", RN7, "shell",
-        'am start -a android.intent.action.VIEW -d "https://gemini.google.com/app" '
-        f'-n {FENNEC}/org.mozilla.fenix.IntentReceiverActivity'])
-    time.sleep(2)
-    sh([ADB, "-s", RN7, "shell", "input tap 83 331"])
-    time.sleep(2)
-
-
-def harvest_gemini(client, max_new, force, known, skip):
-    console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
-    # Mulai dari kondisi yg PASTI. Panen sebelumnya meninggalkan tab di
-    # halaman percakapan (/app/<id>); membaca menu dari sana bisa menggantung
-    # (kejadian nyata: "hasil async tak kunjung terisi"). Kembalikan dulu ke
-    # /app, lalu attach ULANG krn navigasi menghancurkan konteks JS.
-    try:
-        client.eval_js(console, "location.href='https://gemini.google.com/app';", timeout=10)
-    except Exception:
-        pass
-    time.sleep(9)
-    console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
-    # ⚠️⚠️ GEMINI GANTI UI (ditemukan+diverifikasi 2026-09-20 dgn membaca DOM
-    # nyata). Pembuka daftar riwayat BUKAN LAGI [aria-label="Menu utama"] (label
-    # itu SUDAH TIDAK ADA) melainkan [aria-label="Buka sidebar"] (EN: "Open side
-    # panel"/"Open sidebar"). Inilah biang gemini gagal beruntun 20/9 - BUKAN
-    # soal hidrasi (halaman ter-render & AKUN TETAP LOGIN, cuma selector usang).
-    # Semua selector di adapter ini kini pakai daftar OPENER (label baru dulu,
-    # label lama sbg fallback kalau Gemini A/B-test balik). Kalau gemini "0/tak
-    # bisa dibaca" lagi ke depan: DUMP aria-label tombol dulu, jangan tebak.
-    #
-    # Lapisan tunggu-hidrasi di bawah TETAP berguna (SPA Gemini lambat, apalagi
-    # pasca Fennec cold-restart): poll s/d 6x, reload SEKALI di tengah. JANGAN
-    # reload tiap ulangan (membuang progres hidrasi). Tetap bedakan "kosong" vs
-    # "buta" -> error eksplisit, bukan 0 palsu.
-    for att in range(1, 7):
-        ready = js_json(client, console, """
-          const OPENER = ['[aria-label="Buka sidebar"]','[aria-label="Open side panel"]',
-                          '[aria-label="Open sidebar"]','[aria-label="Main menu"]',
-                          '[aria-label="Menu utama"]'];
-          const ok = !!(OPENER.map(s=>document.querySelector(s)).find(Boolean)
-                     || document.querySelector('a[href^="/app/"]'));
-          window.__rdp_out = JSON.stringify({ready: ok});
-        """, timeout=30).get("ready")
-        if ready:
-            break
-        # SPA Gemini berat: hidrasi berlangsung SENDIRI seiring waktu. Reload
-        # tiap ulangan (versi awal harden) justru MEMBUANG progres hidrasi &
-        # memaksa Fennec (baru cold-restart + sibuk VN) mulai dr nol -> malah
-        # tak pernah selesai. Strategi benar: cukup TUNGGU & poll ulang; reload
-        # SEKALI di tengah saja kalau benar-benar macet (mis. tab nyangkut).
-        if att == 3:
-            log("gemini: masih belum ter-hidrasi - reload sekali + tunggu...")
-            try:
-                client.eval_js(console, "location.reload();", timeout=10)
-            except Exception:
-                pass
-            time.sleep(15)
-            console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
-        else:
-            log(f"gemini: menunggu hidrasi SPA... ({att}/6)")
-            time.sleep(8)
-    # Buka SIDEBAR lalu baca daftarnya DALAM SATU panggilan JS.
-    # ⚠️ Jangan dipisah jadi 2 panggilan: sidebar keburu tertutup di antara
-    # keduanya sehingga daftar terbaca 0 (akun tampak kosong padahal ada) -
-    # jebakan nyata saat pengujian.
-    # Tombolnya kini `[aria-label="Buka sidebar"]` (lihat catatan GANTI UI di
-    # atas); label lama dipertahankan sbg fallback.
-    lst = js_json(client, console, """
-      const OPENER = ['[aria-label="Buka sidebar"]','[aria-label="Open side panel"]',
-                      '[aria-label="Open sidebar"]','[aria-label="Main menu"]',
-                      '[aria-label="Menu utama"]'];
-      const findOpener = () => OPENER.map(s=>document.querySelector(s)).find(Boolean) || null;
-      const bacaLink = () => {
-        const links = [...document.querySelectorAll('a[href^="/app/"]')]
-          .map(a => ({id: (a.getAttribute('href')||'').split('/app/')[1],
-                      title: (a.innerText||'').trim()}))
-          .filter(x => x.id && x.title);
-        const seen = new Set(); const out = [];
-        for (const l of links) { if (!seen.has(l.id)) { seen.add(l.id); out.push(l); } }
-        return out;
-      };
-      // Sidebar itu TOGGLE: klik HANYA kalau daftar belum tampak.
-      // ⚠️ UI mobile Gemini (mat-drawer-over) MENGABAIKAN klik sintetis via RDP
-      // (diverifikasi 20/9: .click() & dispatch MouseEvent penuh tak membuka
-      // drawer). Kita tetap coba klik+dispatch (best-effort, kalau Gemini ubah
-      // lagi bisa jalan) TAPI kebenaran dibaca dari STATUS DRAWER, bukan "0 link".
-      const tap = (el) => {
-        if (!el) return;
-        const t = el.closest('button') || el;
-        try { t.click(); } catch(e){}
-        for (const ty of ['pointerdown','mousedown','pointerup','mouseup','click'])
-          t.dispatchEvent(new MouseEvent(ty,{bubbles:true,cancelable:true,view:window}));
-      };
-      let items = bacaLink();
-      for (let att = 0; att < 4 && !items.length; att++) {
-        tap(findOpener());
-        await new Promise(r => setTimeout(r, 4000));
-        items = bacaLink();
-      }
-      // Status drawer riwayat: pembeda "akun kosong" (drawer TERBUKA tapi nol
-      // percakapan) dari "BUTA" (drawer tak mau terbuka). Tanpa ini halaman buta
-      // melaporkan 0 & TAMPAK sehat - bug senyap paling berbahaya di pipeline.
-      const nav = document.querySelector('mat-sidenav');
-      const drawerOpened = !!(nav && nav.classList.contains('mat-drawer-opened'));
-      window.__rdp_out = JSON.stringify({n: items.length, items,
-                                         openerAda: !!findOpener(), drawerOpened});
-    """, timeout=90)
-    items = lst.get("items", [])
-    # Hanya percaya "0 percakapan" kalau daftar benar bisa dibaca: ada link ATAU
-    # drawer riwayat BENAR-BENAR terbuka (berarti kosong asli). Selain itu -> BUTA.
-    if not items and not lst.get("drawerOpened"):
-        # (diselidiki+fix 2026-11-01) klik sintetis RDP TERBUKTI selalu gagal
-        # di UI mobile Gemini build ini -- coba fallback real-tap OS-level via
-        # adb sebelum menyerah (lihat _gemini_sidebar_tap_fallback()).
-        log("gemini: drawer tak terbuka via klik sintetis -- coba real-tap OS-level (fallback)...")
-        _gemini_sidebar_tap_fallback()
-        # (fix race condition, ditemukan 2026-11-01) tap fisik BERHASIL buka
-        # drawer tapi animasi slide-in + render Angular/React-nya butuh lebih
-        # dari sesaat -- cek sekali langsung pasca-tap sering masih "belum",
-        # padahal screenshot sesaat sesudahnya BENAR terbuka. Poll singkat
-        # drpd satu cek tunggal, sama pola dgn loop klik sintetis di atas.
-        lst = js_json(client, console, """
-          const bacaLink = () => {
-            const links = [...document.querySelectorAll('a[href^="/app/"]')]
-              .map(a => ({id: (a.getAttribute('href')||'').split('/app/')[1],
-                          title: (a.innerText||'').trim()}))
-              .filter(x => x.id && x.title);
-            const seen = new Set(); const out = [];
-            for (const l of links) { if (!seen.has(l.id)) { seen.add(l.id); out.push(l); } }
-            return out;
-          };
-          const drawerStatus = () => {
-            const nav = document.querySelector('mat-sidenav');
-            return !!(nav && nav.classList.contains('mat-drawer-opened'));
-          };
-          let items = bacaLink();
-          for (let att = 0; att < 4 && !items.length && !drawerStatus(); att++) {
-            await new Promise(r => setTimeout(r, 1500));
-            items = bacaLink();
-          }
-          window.__rdp_out = JSON.stringify({n: items.length, items, drawerOpened: drawerStatus()});
-        """, timeout=30)
-        items = lst.get("items", [])
-        if items or lst.get("drawerOpened"):
-            log(f"gemini: real-tap fallback berhasil, {len(items)} percakapan terbaca.")
-    if not items and not lst.get("drawerOpened"):
-        raise RuntimeError(
-            "daftar Gemini TAK BISA DIBACA: drawer riwayat tak terbuka via klik "
-            "sintetis MAUPUN real-tap OS-level fallback (UI Gemini kemungkinan "
-            "ganti lagi, atau koordinat kalibrasi di _gemini_sidebar_tap_fallback() "
-            "usang - perlu dihitung ulang). BUKAN akun kosong.")
-    log(f"gemini: {len(items)} percakapan terlihat di daftar 'Terbaru'")
-
-    # Gemini tak memberi timestamp di daftar -> dedup pakai KEBERADAAN id saja.
-    # Konsekuensinya percakapan lama yg DILANJUTKAN tak otomatis ter-refresh;
-    # pakai --force kalau perlu ambil ulang.
-    known_ids = set(known.keys())  # Gemini tak punya timestamp -> dedup presence-only
-    todo = [c for c in items
-            if (force or c["id"] not in known_ids) and c["id"] not in skip][:max_new]
-    out = []
-    for i, c in enumerate(todo, 1):
-        try:
-            # Navigasi MENGHANCURKAN konteks JS -> perintah pindah halaman
-            # dikirim "tembak-lalu-lupakan", ditunggu dr sisi Python, baru
-            # tab di-attach ULANG dan isinya dibaca di konteks yg baru.
-            # (Membaca hasil di panggilan yg sama SELALU gagal: balasannya
-            # bukan string JSON lagi - jebakan nyata saat pengujian.)
-            try:
-                client.eval_js(console, f"location.href='/app/{c['id']}';", timeout=10)
-            except Exception as e:
-                log(f"  gemini [{i}/{len(todo)}] navigasi ke {c['id']} error ({e}), verifikasi tetap dicoba...")
-
-            # HARDEN (code-review): dulu tidur tetap 9dtk lalu attach tab GEMINI
-            # MANAPUN (match substring domain kasar) tanpa cek apakah tab itu
-            # BENAR sudah pindah ke percakapan c['id'] - navigasi lambat/gagal
-            # bisa diam-diam membaca DOM percakapan LAMA tapi tersimpan ke DB
-            # pakai id percakapan BARU (kontaminasi silang). Sekarang verifikasi
-            # location.href memuat id target dulu sebelum baca DOM; kalau tak
-            # pernah cocok, raise eksplisit (tertangkap except di bawah -> GAGAL
-            # & lanjut, bukan simpan data yang salah).
-            matched = False
-            for att in range(5):
-                # (code-review fix #8) dulu lantai tetap 9dtk SEBELUM cek
-                # pertama, biar navigasi sebenarnya sudah kelar <2dtk -- jadi
-                # linear x jumlah percakapan tanpa guna. Sekarang cek pertama
-                # cuma nunggu 2dtk (cukup utk location.href mulai berpindah),
-                # baru 3dtk per percobaan berikutnya kalau belum cocok.
-                time.sleep(2 if att == 0 else 3)
-                console = open_tab(client, "gemini.google", "https://gemini.google.com/app")
-                cur = js_json(client, console,
-                              "window.__rdp_out = JSON.stringify({href: location.href});",
-                              timeout=10)
-                if c["id"] in (cur.get("href") or ""):
-                    matched = True
-                    break
-                log(f"  gemini [{i}/{len(todo)}] tab belum pindah ke {c['id']} (percobaan {att+1}/5)...")
-            if not matched:
-                raise RuntimeError(
-                    f"navigasi ke percakapan {c['id']} gagal diverifikasi - DOM TIDAK dibaca "
-                    "(cegah kontaminasi data lintas-percakapan)")
-
-            d = js_json(client, console, r"""
-              // DOM Gemini menyisipkan label aksesibilitas di awal tiap
-              // pesan ("Anda berkata" / "Gemini berkata", versi Inggris
-              // "You said" / "Gemini said") - itu bukan isi percakapan,
-              // dibuang supaya arsipnya bersih.
-              const bersih = t => (t||'').trim()
-                .replace(/^(Anda berkata|You said|Gemini berkata|Gemini said)\s*/i, '')
-                .trim();
-              const users = [...document.querySelectorAll('user-query')]
-                  .map(e => bersih(e.innerText)).filter(Boolean);
-              const bots  = [...document.querySelectorAll('model-response')]
-                  .map(e => bersih(e.innerText)).filter(Boolean);
-              const msgs = [];
-              const n = Math.max(users.length, bots.length);
-              for (let k = 0; k < n; k++) {
-                if (users[k]) msgs.push({role:'user', content: users[k]});
-                if (bots[k])  msgs.push({role:'assistant', content: bots[k]});
-              }
-              window.__rdp_out = JSON.stringify({title: document.title, messages: msgs});
-            """, timeout=90)
-        except Exception as e:
-            log(f"  gemini [{i}/{len(todo)}] GAGAL {c['title'][:40]!r}: {e}")
-            continue
-        msgs = d.get("messages", [])
-        # DOM tak memberi id/waktu per-pesan -> pakai urutan sbg identitas stabil
-        for k, m in enumerate(msgs, 1):
-            m["msg_id"] = f"{c['id']}-{k}"
-            m["created_at"] = None
-        if not msgs:
-            log(f"  gemini [{i}/{len(todo)}] {c['title'][:42]!r} - KOSONG, dilewati")
-            continue
-        out.append({"id": c["id"], "source": "gemini", "account": "clawapp810@gmail.com",
-                    "title": c["title"], "created_at": None, "updated_at": time.time(),
-                    "message_count": len(msgs), "messages": msgs,
-                    "raw": {"catatan": "diekstrak dari DOM; waktu per-pesan tak tersedia"}})
-        log(f"  gemini [{i}/{len(todo)}] {c['title'][:42]!r} - {len(msgs)} pesan")
-    return out
-
-
 # ------------------------------ umum -------------------------------
 
 # (code-review fix #9/#14) existing() dihapus dari sini -- dulu duplikat
@@ -453,7 +171,7 @@ def ignored(sources):
     return skip
 
 
-ADAPTERS = {"chatgpt": harvest_chatgpt, "claude": harvest_claude, "gemini": harvest_gemini}
+ADAPTERS = {"chatgpt": harvest_chatgpt, "claude": harvest_claude}
 
 
 def main():
@@ -461,8 +179,6 @@ def main():
     ap.add_argument("--source", choices=list(ADAPTERS), action="append",
                     help="boleh diulang; default: semua")
     ap.add_argument("--max-new", type=int, default=25)
-    ap.add_argument("--gemini-max-new", type=int, default=5,
-                    help="Gemini jauh lebih lambat (buka tiap percakapan di browser)")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     sources = a.source or list(ADAPTERS)
@@ -489,9 +205,8 @@ def main():
     all_records = []
     try:
         for src in sources:
-            cap = a.gemini_max_new if src == "gemini" else a.max_new
             try:
-                recs = ADAPTERS[src](client, cap, a.force,
+                recs = ADAPTERS[src](client, a.max_new, a.force,
                                       known_all.get(src, {}), skip_all.get(src, set()))
                 all_records.extend(recs)
                 results[src] = len(recs)
