@@ -176,44 +176,14 @@ _deploy_balibruntattour_impl() {
 # ---------------------------------------------------------------------
 # deploy_gogobuda — .61, n8n-uploader (repo mcp-video-editor)
 # ---------------------------------------------------------------------
-deploy_gogobuda() { _locked_deploy gogobuda _deploy_gogobuda_impl; }
-_deploy_gogobuda_impl() {
-  # .61 (gogobuda) KINI = worker SCRAPER riset tren TikTok (requests-only), BUKAN
-  # n8n (n8n medsos pindah ke CHROME-VPS, 27/9). Deploy RINGAN: scp kode
-  # scraper-worker + watchlist, pastikan `requests`, verifikasi modul importable.
-  # Idempoten (dipanggil cron */5 begitu laptop boot & .61 naik); file kecil, nol build.
-  local host="gogobuda65@10.66.66.61"
-  local sw="$HOME/akses-vps/scraper-worker"
-  local wl="$HOME/akses-vps/social-analytics/tiktok_watchlist.json"
-  local rdir="scraper-worker"
-
-  if ! reachable_cs "$host"; then
-    echo ".61 (gogobuda) belum reachable."
-    return 1
-  fi
-
-  ssh "${CS_SSHOPTS[@]}" "$host" "mkdir -p $rdir" || { echo ".61 (gogobuda) mkdir gagal."; return 1; }
-  if ! scp "${CS_SSHOPTS[@]}" "$sw/tiktok_scraper.py" "$sw/run_worker.py" "$host:$rdir/" >/dev/null 2>&1; then
-    echo ".61 (gogobuda) scp kode scraper GAGAL."
-    return 1
-  fi
-  if [ -f "$wl" ]; then
-    scp "${CS_SSHOPTS[@]}" "$wl" "$host:$rdir/watchlist.json" >/dev/null 2>&1 \
-      || echo ".61 (gogobuda) WARN: watchlist tak terkirim (deploy lanjut)."
-  fi
-
-  # requests biasanya sudah ada di Cloud Shell; pasang bila tidak.
-  ssh "${CS_SSHOPTS[@]}" "$host" 'python3 -c "import requests" 2>/dev/null || pip install --quiet --user requests' \
-    || { echo ".61 (gogobuda) requests tak bisa dipasang."; return 1; }
-
-  # SEHAT (kontrak: 0 = verified) = modul scraper importable + kelas kunci ada.
-  if ssh "${CS_SSHOPTS[@]}" "$host" "cd $rdir && python3 -c 'import tiktok_scraper as t; assert hasattr(t,\"TikTokScraper\")'" >/dev/null 2>&1; then
-    echo ".61 (gogobuda) scraper-worker SEHAT terverifikasi (kode + requests siap)."
-    return 0
-  fi
-  echo ".61 (gogobuda) scraper-worker verifikasi import GAGAL."
-  return 1
-}
+# ⛔ 2026-10-16: deploy_gogobuda() (scraper-worker TikTok di .61) DIHAPUS.
+# TikTok dibuang total dari pipeline riset tren (keputusan user -- scraping
+# anonim terus kena CAPTCHA/WAF, DAN jadi akar bug analyzer rusak 48 hari,
+# lihat project_viral_analyzer.md). Riset tren kini Instagram+YouTube via
+# social_trend.py, jalan dari HUB langsung (TAK butuh .61/laptop sama
+# sekali) -- jadi .61 tak lagi punya peran scraper-worker apa pun.
+# .61 TETAP punya peran lain (GUI login, lihat deploy_gogobuda_gui() di
+# bawah) -- itu TIDAK terpengaruh, sengaja dipertahankan.
 
 # ---------------------------------------------------------------------
 # deploy_gogobuda_gui — .61 JUGA host stasiun login GUI (gui-chromium +

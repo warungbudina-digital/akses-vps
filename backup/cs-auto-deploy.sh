@@ -38,13 +38,9 @@ run_and_log() { "$1" 2>&1 | sed 's/^/[cs-auto-deploy] /' | tee -a "$LOG" >/dev/n
 
 run_and_log deploy_yuni
 run_and_log deploy_balibruntattour
-# 2026-09-27: deploy_gogobuda DIALIH-FUNGSIKAN + DIAKTIFKAN LAGI. .61 bukan lagi
-# n8n (n8n medsos permanen di CHROME-VPS) -> deploy_gogobuda kini men-deploy
-# WORKER SCRAPER riset tren (scraper-worker, requests-only) tiap laptop boot &
-# .61 naik. Ringan (scp kode + verifikasi import python/requests, NOL build),
-# jadi konflik "instance n8n kedua" yg lama TIDAK berlaku lagi. Rollback: lihat
-# git history lib-cs-deploy.sh (_deploy_gogobuda_impl versi n8n).
-run_and_log deploy_gogobuda
+# ⛔ 2026-10-16: run_and_log deploy_gogobuda (scraper-worker TikTok) DIHAPUS --
+# fungsinya sendiri sudah dihapus dari lib-cs-deploy.sh (TikTok dibuang total
+# dari pipeline riset tren). deploy_gogobuda_gui TAK terpengaruh, tetap jalan.
 run_and_log deploy_gogobuda_gui
 
 log "cs-auto-deploy selesai."
