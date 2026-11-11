@@ -43,7 +43,12 @@ C50_INPUT   = "~/tool-analisa-video/data/input"
 ANALYZER    = "http://127.0.0.1:9021"
 COOKIES     = {"youtube":"yt-cookies.txt", "facebook":"fb-cookies.txt", "instagram":"ig-cookies.txt"}
 MAX_JOBS    = int(os.getenv("MAX_JOBS", "0"))
-ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "1200"))  # detik; whisper CPU (V2) utk video panjang bisa >5mnt
+ANALYZE_TIMEOUT = int(os.getenv("ANALYZE_TIMEOUT", "7200"))  # detik; pipeline PENUH (ASR+semantic+scene/motion/face)
+# video panjang (cth 55mnt) bisa >20mnt total -- 1200s lama TERBUKTI motong
+# paksa /analyze sebelum selesai (job#24, 11/11: 3x rc=28 curl timeout, 0x
+# benar2 gagal krn mutu). 7200s (2 jam) = jaring aman generous, worker
+# single-thread/flock jadi tak ada downside nunggu lebih lama kalau memang
+# perlu -- lihat memori project_viral_analyzer.md.
 # (2026-08-28) opsi 3 permintaan user: sambungkan ir_to_vn.py ke drain
 # otomatis, supaya tiap analisa SEKALIAN hasilkan cetak-biru reproduksi VN
 # (termasuk .story-script.md, WAJIB per SOP lama -- lihat memori
