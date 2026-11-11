@@ -15,6 +15,7 @@ from urllib.parse import urlparse, parse_qs
 
 DBVPS = "db-vps"
 CATS  = {"viral_video", "menuju_viral_video"}
+LANGS = {"id", "en", "auto"}  # None/tak disebut = default env analyzer (perilaku lama)
 # (2026-11-03, permintaan user "pemisahan permanen") titik masuk antrean
 # memicu run-drain.sh SENDIRI, fire-and-forget -- TAK lagi menunggu cron
 # 10mnt + gerbang-3-profil lama (lihat analyzer-pipeline-trigger.sh).
@@ -71,6 +72,8 @@ def main():
     ap.add_argument("urls", nargs="*")
     ap.add_argument("--stdin", action="store_true", help="baca '<category> <url>' per baris dari stdin")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan deteksi, jangan insert")
+    ap.add_argument("--language", choices=sorted(LANGS), default=None,
+                     help="bahasa ASR job ini (id/en/auto); tak diisi = default env analyzer")
     a = ap.parse_args()
 
     rows = []
@@ -97,14 +100,14 @@ def main():
     vals = []
     for cat, url in rows:
         plat, eid = detect(url)
-        print(f"  [{cat}] {plat or '?'}:{eid or '?'}  {url[:64]}")
-        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser')")
+        print(f"  [{cat}] {plat or '?'}:{eid or '?'} lang={a.language or 'default'}  {url[:64]}")
+        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser',{lit(a.language)})")
 
     if a.dry_run:
         print(f"[dry-run] {len(rows)} URL (tak di-insert).")
         return
 
-    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by) VALUES "
+    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,language) VALUES "
            + ", ".join(vals) + " ON CONFLICT (source_url) DO NOTHING RETURNING id;")
     # -q (quiet): tekan tag status perintah ("INSERT 0 N") agar TIDAK ikut ke stdout —
     # tanpa ini token digit dari "INSERT 0 N" mencemari hitungan (id RETURNING saja yang boleh).

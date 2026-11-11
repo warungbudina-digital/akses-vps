@@ -143,7 +143,7 @@ CLAIM_SQL = ("UPDATE media.video_ingest SET status='processing', claimed_at=now(
              "SELECT id FROM media.video_ingest WHERE status='pending' AND attempts < max_attempts "
              "ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT 1) "
              "RETURNING json_build_object('id',id,'category',category,"
-             "'platform',coalesce(platform,''),'url',source_url)::text;")
+             "'platform',coalesce(platform,''),'url',source_url,'language',language)::text;")
 
 def claim():
     r = psql(CLAIM_SQL)
@@ -153,8 +153,11 @@ def claim():
         ln = ln.strip()
         if ln.startswith("{"):                # baris job = JSON object (aman escaping)
             j = json.loads(ln)
+            # language: NULL di DB (job lama/tak disebut) -> None -> analyze()
+            # TAK kirim key itu ke /analyze -> analyzer pakai default env-nya
+            # sendiri, payload IDENTIK perilaku sebelum fitur ini ada.
             return {"id": int(j["id"]), "category": j["category"],
-                    "platform": j["platform"], "url": j["url"]}
+                    "platform": j["platform"], "url": j["url"], "language": j.get("language")}
     return None
 
 def fail_job(job, err):
@@ -226,8 +229,11 @@ def stream_to_c50(job, dbvps_relpath):
         return None, "stream DB-VPS->.50 gagal"
     return f"/data/input/job-{jid}.{ext}", None       # path DI DALAM container analyzer
 
-def analyze(container_path):
-    payload = json.dumps({"video_path": container_path})
+def analyze(container_path, language=None):
+    body = {"video_path": container_path}
+    if language:                      # None/'' -> key DIHILANGKAN, bukan dikirim kosong
+        body["language"] = language   # (payload job lama/tak-disebut identik persis sebelum fitur ini)
+    payload = json.dumps(body)
     cmd = (f"curl -s --max-time {ANALYZE_TIMEOUT} -X POST {ANALYZER}/analyze "
            f"-H 'Content-Type: application/json' -d {shlex.quote(payload)}")
     r = ssh_c50(cmd, timeout=ANALYZE_TIMEOUT + 60)
@@ -496,9 +502,10 @@ def main():
             cpath, err = stream_to_c50(job, relpath)
             if err:
                 log("  x stream:", err); fail_job(job, err); cleanup(job["id"]); fail += 1; continue
-            data, err = analyze(cpath)
+            data, err = analyze(cpath, job.get("language"))
             if err:
                 log("  x analyze:", err); fail_job(job, err); cleanup(job["id"]); fail += 1; continue
+            log(f"  lang: diminta={job.get('language') or 'default'} efektif={data.get('language_used')}")
             werr = write_result(job, data)
             if werr:
                 log("  x write:", werr); fail_job(job, werr); cleanup(job["id"]); fail += 1; continue

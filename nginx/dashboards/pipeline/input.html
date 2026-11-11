@@ -43,6 +43,14 @@
       <option value="menuju_viral_video">menuju_viral_video</option>
     </select>
 
+    <label for="language">Bahasa audio (utk subtitle whisper)</label>
+    <select id="language">
+      <option value="">(default server, saat ini Indonesia)</option>
+      <option value="id">Indonesia</option>
+      <option value="en">Inggris</option>
+      <option value="auto">Auto-detect</option>
+    </select>
+
     <label for="note">Catatan (opsional)</label>
     <textarea id="note" placeholder="mis. referensi hook kuat, dari kompetitor X"></textarea>
 
@@ -69,6 +77,7 @@
     ev.preventDefault();
     var url = document.getElementById("url").value.trim();
     var category = document.getElementById("category").value;
+    var language = document.getElementById("language").value;
     var note = document.getElementById("note").value.trim();
     var token = tokenEl.value.trim();
     var btn = document.getElementById("btn");
@@ -87,7 +96,7 @@
     fetch("/api/enqueue", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-      body: JSON.stringify({ url: url, category: category, note: note })
+      body: JSON.stringify({ url: url, category: category, note: note, language: language })
     }).then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
       .then(function (res) {
         btn.disabled = false; btn.textContent = "Masukkan ke antrean";
@@ -96,6 +105,7 @@
           msg.className = "ok"; msg.style.display = "block";
           document.getElementById("url").value = "";
           document.getElementById("note").value = "";
+          document.getElementById("language").value = "";
         } else if (res.status === 401) {
           msg.textContent = "Token salah/belum diisi.";
           msg.className = "err"; msg.style.display = "block";

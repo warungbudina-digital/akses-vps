@@ -56,3 +56,12 @@ ALTER TABLE media.video_ingest
     ADD COLUMN IF NOT EXISTS decision text CHECK (decision IN ('pilih','tunda','skip')),
     ADD COLUMN IF NOT EXISTS used_in_rn7 boolean NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS raw_footage_folder text;
+
+-- ---------- BAHASA ASR PER-JOB (2026-11-11) ----------
+-- language: NULL = tak disebut (job lama/default) -> analyzer pakai env
+-- ASR_LANGUAGE sendiri (perilaku lama, mundur-kompatibel). 'id'/'en' = paksa
+-- bahasa whisper; 'auto' = auto-detect eksplisit. DITERAPKAN TERPISAH thd DB
+-- hidup (bukan lewat file ini -- file ini DROP TABLE CASCADE di atas,
+-- destruktif thd antrean hidup); baris di bawah murni DOKUMENTASI.
+ALTER TABLE media.video_ingest
+    ADD COLUMN IF NOT EXISTS language text CHECK (language IN ('id','en','auto'));

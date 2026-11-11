@@ -33,7 +33,7 @@ import json, os, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from enqueue import detect, esc, lit, DBVPS, CATS, trigger_drain  # reuse, jangan duplikasi
+from enqueue import detect, esc, lit, DBVPS, CATS, LANGS, trigger_drain  # reuse, jangan duplikasi
 from dashboard import fetch as fetch_status  # reuse SQL+parse, jangan duplikasi
 
 _status_cache = {"t": 0.0, "data": None}
@@ -63,15 +63,17 @@ def log(*a):
     print("[dashboard_api]", *a, file=sys.stderr, flush=True)
 
 
-def insert_url(category, url, note):
+def insert_url(category, url, note, language=None):
     if category not in CATS:
         return None, f"kategori tak valid (harus salah satu: {sorted(CATS)})"
     if not url.startswith(("http://", "https://")):
         return None, "url harus http/https"
+    if language and language not in LANGS:
+        return None, f"language tak valid (harus salah satu: {sorted(LANGS)}, atau kosongkan)"
     plat, eid = detect(url)
     note_lit = lit((note or "").strip()[:300])
-    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,user_notes) "
-           f"VALUES ('{esc(category)}',{lit(plat)},'{esc(url)}',{lit(eid)},'dashboard',{note_lit}) "
+    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,user_notes,language) "
+           f"VALUES ('{esc(category)}',{lit(plat)},'{esc(url)}',{lit(eid)},'dashboard',{note_lit},{lit(language)}) "
            "ON CONFLICT (source_url) DO NOTHING RETURNING id;")
     r = subprocess.run(["ssh", DBVPS, "sudo -n -u postgres psql -d scraper -tAq"],
                         input=sql, capture_output=True, text=True, timeout=30)
@@ -113,9 +115,10 @@ class Handler(BaseHTTPRequestHandler):
         url = (data.get("url") or "").strip()
         category = (data.get("category") or "").strip()
         note = data.get("note") or ""
+        language = (data.get("language") or "").strip() or None
         if not url:
             self._send(400, {"ok": False, "error": "url wajib diisi"}); return
-        jid, err = insert_url(category, url, note)
+        jid, err = insert_url(category, url, note, language)
         if err:
             log("tolak:", category, url[:80], "->", err)
             self._send(200, {"ok": False, "error": err}); return
