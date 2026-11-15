@@ -52,3 +52,15 @@ services:
       resources:
         limits:
           memory: 4g
+
+  cdp-relay:
+    image: alpine/socat
+    container_name: cdp-relay
+    restart: unless-stopped
+    network_mode: host
+    command: ["TCP-LISTEN:9222,bind=10.66.66.61,fork,reuseaddr,range=10.66.66.60/32", "TCP:127.0.0.1:9222"]
+    deploy:
+      resources:
+        limits:
+          memory: 32m
+          cpus: "0.1"
