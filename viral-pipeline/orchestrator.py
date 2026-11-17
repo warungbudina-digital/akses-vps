@@ -148,7 +148,8 @@ CLAIM_SQL = ("UPDATE media.video_ingest SET status='processing', claimed_at=now(
              "SELECT id FROM media.video_ingest WHERE status='pending' AND attempts < max_attempts "
              "ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT 1) "
              "RETURNING json_build_object('id',id,'category',category,"
-             "'platform',coalesce(platform,''),'url',source_url,'language',language,'views',views)::text;")
+             "'platform',coalesce(platform,''),'url',source_url,'language',language,'views',views,"
+             "'notes',user_notes)::text;")
 
 def claim():
     r = psql(CLAIM_SQL)
@@ -163,7 +164,7 @@ def claim():
             # sendiri, payload IDENTIK perilaku sebelum fitur ini ada.
             return {"id": int(j["id"]), "category": j["category"],
                     "platform": j["platform"], "url": j["url"], "language": j.get("language"),
-                    "views": j.get("views")}
+                    "views": j.get("views"), "notes": j.get("notes")}
     return None
 
 def fail_job(job, err):
@@ -300,18 +301,21 @@ _CAT_LABEL = {"viral_video": "Viral", "menuju_viral_video": "Menuju Viral"}
 def write_title_md(job, outdir):
     """(2026-11-17, permintaan user) Title.md ringkas per job di folder
     reproductions/job-<id>/ -- link URL + kriteria viral/menuju-viral + views
-    (manual, dari enqueue.py --views) + catatan. Best-effort PENUH sama pola
-    build_reproduction(): kegagalan tulis file TAK PERNAH gagalkan job.
-    Catatan hampir pasti kosong saat ditulis (user_notes diisi manusia
-    SETELAH review, bukan saat job ini baru selesai dianalisa) -- placeholder
-    sengaja, bukan bug."""
+    (manual, dari enqueue.py --views / dashboard) + catatan. Best-effort
+    PENUH sama pola build_reproduction(): kegagalan tulis file TAK PERNAH
+    gagalkan job. Catatan = user_notes APA ADANYA, persis yg diisi user saat
+    input URL (dashboard input.html field "Catatan", atau kosong kalau lewat
+    enqueue.py CLI yg tak punya field itu) -- BUKAN diisi belakangan, krn
+    user_notes sudah terisi SEBELUM job ini dianalisa (ditulis saat enqueue,
+    bukan saat review)."""
     views = job.get("views")
+    notes = (job.get("notes") or "").strip()
     md = (
         f"# Job #{job['id']} -- {job.get('platform','?')}\n\n"
         f"- **URL:** {job['url']}\n"
         f"- **Kriteria:** {_CAT_LABEL.get(job['category'], job['category'])}\n"
         f"- **Views:** {views if views is not None else '-'}\n"
-        f"- **Catatan:** (diisi manual setelah review)\n"
+        f"- **Catatan:** {notes if notes else '-'}\n"
     )
     try:
         with open(os.path.join(outdir, "Title.md"), "w", encoding="utf-8") as f:
