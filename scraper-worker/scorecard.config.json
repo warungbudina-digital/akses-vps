@@ -2,12 +2,11 @@
   "_catatan": "Bobot & ambang Viral Scorecard. Bobot grup default 0.30/0.30/0.20/0.20 (bisa disetel). Ambang = titik kalibrasi pemetaan metrik objektif -> skala 1..5 (linear di-clamp).",
   "weights": { "g1": 0.30, "g2": 0.30, "g3": 0.20, "g4": 0.20 },
   "zones": { "green": 4.2, "yellow": 3.0 },
-  "top_k": 3,
-  "_top_k": "REVISI 17/10 (permintaan user): Top-3/HARI, bukan /run -- cron scorecard-cron.sh jalan 2x/hari, jadi top_k ini membatasi TIER-2 per-RUN; cap harian (3 video BARU, lintas kedua run) ditegakkan terpisah via _enqueue_today_gate() di viral_scorecard.py.",
+  "top_k": 10,
   "thresholds": {
-    "like_rate_pct":    { "lo": 1.0, "hi": 10.0, "_": "-> Nilai Berbagi (G2). like-rate median niche ~1%, kuat ~10%+ (REVISI 16/10, IG/YT tak expose save/share-rate publik, lihat viral_scorecard.py docstring)" },
-    "comment_rate_pct": { "lo": 0.05, "hi": 1.0 },
-    "trend_ratio":      { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). views video / median views akun. >1 = di atas baseline" },
-    "duration_fast_s":  { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). AKTIF sejak 17/10 -- social_trend.py menangkap duration_sec (IG via efg media_url, YT via scrape watch-page). <=15s skor 5, >=90s skor 1, linear di antaranya." }
+    "save_rate_pct":   { "lo": 0.1, "hi": 3.0, "_": "-> Nilai Berbagi (G2). save-rate median niche ~0.1%, kuat ~3%+" },
+    "share_rate_pct":  { "lo": 0.1, "hi": 2.0 },
+    "trend_ratio":     { "lo": 0.5, "hi": 4.0, "_": "-> Trend Jacking (G3). plays video / median plays akun. >1 = di atas baseline" },
+    "duration_fast_s": { "lo": 15,  "hi": 90,  "_": "-> Kecepatan Eksekusi (G4). makin pendek/simpel makin cepat dibuat" }
   }
 }
