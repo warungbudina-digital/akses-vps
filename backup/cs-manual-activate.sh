@@ -40,19 +40,72 @@ esac
 # shellcheck disable=SC1091
 . "$HOME/akses-vps/backup/lib-cs-deploy.sh"
 
-echo "=== [1/4] Bootstrap via laptop (open-cs.ps1 -Profile $PROFILE) ==="
-echo "(Chrome akan membuka tab Cloud Shell profil ini di laptop SUARAHATI -- amati di sana.)"
-ssh ltap-mini "powershell -NoProfile -ExecutionPolicy Bypass -File C:\chrome-cdp\open-cs.ps1 -Profile $PROFILE; echo EXITCODE=\$LASTEXITCODE" 2>&1 \
-  | grep -v '^#<\|^<Objs\|CLIXML'
-echo "(exit code di atas cuma indikasi KASAR -- lihat catatan di open-and-bootstrap-cs.py; kebenaran = reachable_cs di bawah.)"
+# (2026-10-28 fix, insiden pasca-outage-listrik 27/10) DUA bug akar ditemukan
+# & diperbaiki di open-and-bootstrap-cs.py/cshell.py (dipanggil skrip ini via
+# open-cs.ps1 -- SAMA PERSIS, tak dobel-tulis di sini):
+#   1. click_terminal() dulu klik KOORDINAT -> kena overlay invisible Cloud
+#      Shell (<security-blocking-indicator>, muncul utk browser EOL spt
+#      Chrome 109 di laptop ini) -> fokus tercabut -> command silent-drop
+#      total (reproduksi live: scrape tetap bersih, nol jejak command).
+#   2. open_profile() vonis "tab tak terdeteksi" kalau tab profil ini SUDAH
+#      terbuka dari attempt sebelumnya (klik shortcut cuma fokus ke tab lama,
+#      bukan buka baru) -> bootstrap di-skip total, padahal tab lama itu
+#      justru live & siap pakai.
+# Kedua fix di atas membuat retype PRODUKTIF (Fix 2 = pakai ulang tab
+# lama, Fix 1 = ketikan ke tab itu tak lagi silent-drop).
+#
+# Tambahan DI SKRIP INI (bukan sekadar warisan fix di atas): kalau node
+# SUDAH reachable (kasus paling umum -- dipanggil cuma utk verifikasi ulang,
+# bukan recovery), bootstrap.sh di VM biasanya SEDANG menjalankan `ping
+# 8.8.8.8` FOREGROUND sbg keepalive (lihat akhir bootstrap.sh) -- shell tak
+# punya prompt kosong utk diketik ulang. Memaksa retype ke sesi sibuk begini
+# percuma/membingungkan (karakter nyasar ke stream ping, bukan command baru).
+# Jadi: cek reachable DULU, skip step bootstrap kalau sudah sehat.
+echo "=== [0/4] Cek apakah $PROFILE SUDAH reachable (hindari ganggu sesi sehat) ==="
+if reachable_cs "$CS_HOST"; then
+  echo "OK: $CS_HOST SUDAH reachable -- skip bootstrap Chrome, langsung ke deploy."
+  up=1
+else
+  echo "$CS_HOST belum reachable -- lanjut bootstrap via laptop."
 
-echo
-echo "=== [2/4] Tunggu WireGuard+SSH naik (maks 90s) ==="
-up=0
-for i in $(seq 1 18); do
-  if reachable_cs "$CS_HOST"; then up=1; break; fi
-  sleep 5
-done
+  echo
+  echo "=== [1/4] Bootstrap via laptop (schtasks /run /tn open-cs-$PROFILE) ==="
+  echo "(Kalau tab Cloud Shell profil ini SUDAH ada & live, skrip laptop PAKAI ULANG tab itu -- tak selalu buka tab baru.)"
+  # (2026-11-03 fix, insiden audit yuni 0/20: SSH biasa TAK membuka window apa pun
+  # di desktop nyata -- terbukti live, os.startfile() di sesi SSH non-interaktif
+  # beda dari sesi logon interaktif yg dipakai NodeDaily-Launcher/task Windows.
+  # Jalur SEBELUMNYA ("ssh ... powershell ... open-cs.ps1") CUMA bisa berhasil
+  # lewat reuse-tab-lama di open-and-bootstrap-cs.py -- kalau profil BELUM punya
+  # tab sama sekali, dulu TAK PERNAH BISA membuka satu. Fix: trigger task Windows
+  # Interactive-only yg sama dipakai laptop sendiri via schtasks /run, BUKAN
+  # panggil powershell/python langsung lewat SSH.)
+  ssh ltap-mini "schtasks /run /tn open-cs-$PROFILE" 2>&1 | grep -v '^#<\|^<Objs\|CLIXML'
+
+  echo
+  echo "=== [1b/4] Tunggu task selesai (schtasks /run return instan, proses asli ~2-3mnt, maks 5mnt) ==="
+  # schtasks /run cuma MEMULAI task, tak nunggu selesai -- kalau langsung lanjut
+  # ke loop reachable 90s di bawah, bisa expired duluan sblm bootstrap sungguhan
+  # tuntas ngetik+apt-get di VM. Poll status task sampai tak lagi "Running".
+  task_done=0
+  for i in $(seq 1 30); do
+    status="$(ssh ltap-mini "schtasks /query /tn open-cs-$PROFILE /fo list" 2>/dev/null | grep -i '^Status:' | awk -F: '{print $2}' | tr -d ' \r')"
+    if [ "$status" != "Running" ]; then task_done=1; break; fi
+    sleep 10
+  done
+  if [ "$task_done" -ne 1 ]; then
+    echo "WARN: task open-cs-$PROFILE masih Running setelah 5mnt -- lanjut cek reachable apa adanya."
+  else
+    echo "OK: task open-cs-$PROFILE selesai (status=$status)."
+  fi
+
+  echo
+  echo "=== [2/4] Tunggu WireGuard+SSH naik (maks 90s) ==="
+  up=0
+  for i in $(seq 1 18); do
+    if reachable_cs "$CS_HOST"; then up=1; break; fi
+    sleep 5
+  done
+fi
 if [ "$up" -ne 1 ]; then
   echo "GAGAL: $CS_HOST tetap tak reachable setelah bootstrap. ${CS_LAST_SSH_ERR:-(timeout, VM kemungkinan belum/tak naik)}"
   exit 1
@@ -71,17 +124,35 @@ fi
 
 echo
 echo "=== [4/4] Verifikasi + pastikan keepalive ping jalan di VM ==="
-ssh "${CS_SSHOPTS[@]}" "$CS_HOST" '
-  if pgrep -f "ping 8.8.8.8" >/dev/null 2>&1; then
-    echo "keepalive SUDAH jalan:"; pgrep -af "ping 8.8.8.8"
+if ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pgrep -af "ping 8.8.8.8"' 2>/dev/null; then
+  echo "keepalive SUDAH jalan."
+else
+  # HARDEN (code-review 2026-11-08): versi lama restart pakai
+  # `setsid bash -c "ping ..." & disown` -- TERLEPAS dari PTY manapun
+  # (terverifikasi live: PPID=1, TTY=?, tak muncul di `who`). Lihat
+  # feedback_cloudshell_key_watchdog_setsid.md: keepalive ini SENGAJA
+  # harus menempel PTY (bukan di-setsid spt key-watchdog) krn Google
+  # butuh ALIRAN DATA TERMINAL supaya sesi tak dianggap idle -- proses
+  # yg lepas dr PTY cuma ngirim ICMP sendirian, percuma utk tujuan ini.
+  # Fix: `ssh -tt` dari HUB memaksa alokasi PTY ASLI di VM (ping jadi
+  # foreground sungguhan di PTY itu, bukan di-background/di-setsid);
+  # koneksi SSH-nya sendiri yg di-nohup+disown di sisi HUB (BUKAN di
+  # sisi VM) supaya PTY & ping-nya bertahan sesudah skrip ini selesai --
+  # PTY otomatis mati kalau koneksi SSH ini ditutup (sama persis pola
+  # "harus ada yg menjaga" dgn tab browser aslinya).
+  echo "keepalive TAK ditemukan -- restart MENEMPEL PTY (via ssh -tt dari hub, bukan setsid)..."
+  ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pkill -f "ping 8.8.8.8" 2>/dev/null; true'
+  KA_LOG="/tmp/cs-keepalive-ssh-${PROFILE}.log"
+  nohup ssh -tt "${CS_SSHOPTS[@]}" "$CS_HOST" 'ping 8.8.8.8' \
+    >"$KA_LOG" 2>&1 </dev/null &
+  disown
+  sleep 2
+  if ssh "${CS_SSHOPTS[@]}" "$CS_HOST" 'pgrep -af "ping 8.8.8.8"' 2>/dev/null; then
+    echo "keepalive RESTART OK (menempel PTY baru, log hub: $KA_LOG)."
   else
-    echo "keepalive TAK ditemukan -- restart..."
-    pkill -f "ping 8.8.8.8" 2>/dev/null
-    setsid bash -c "ping 8.8.8.8 >/tmp/keepalive-ping.log 2>&1 </dev/null" & disown
-    sleep 1
-    pgrep -af "ping 8.8.8.8" && echo "keepalive RESTART OK" || echo "keepalive GAGAL direstart"
+    echo "keepalive GAGAL direstart."
   fi
-'
+fi
 
 echo
 echo "=== SELESAI: $PROFILE (deploy_rc=$deploy_rc) ==="

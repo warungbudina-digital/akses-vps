@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # =====================================================================
-# analyzer-pipeline-trigger.sh — pemicu terjadwal pipeline viral_analyzer
-# (permintaan user 2026-08-28): "kalau semua Cloud Shell sudah aktif,
-# jalankan pipeline analyzer". Dijalankan dari HUB (akses-vps) via cron.
+# analyzer-pipeline-trigger.sh — FALLBACK poller pipeline viral_analyzer.
+# Dijalankan dari HUB (akses-vps) via cron tiap 10mnt.
 #
-# Gerbang: SEMUA 3 profil Cloud Shell (.50 yuni / .60 balibruntattour /
-# .61 gogobuda) harus reachable dulu -- baru panggil run-drain.sh
-# (pemicu on-demand orchestrator.py yg sudah ada, lihat
-# ~/viral-pipeline/README.md "Belum ada: cron poster untuk run-drain").
+# (2026-11-03, permintaan user — AUDIT+PEMISAHAN PERMANEN) Gerbang lama
+# "SEMUA 3 profil Cloud Shell (.50/.60/.61) harus reachable dulu" DIBUANG.
+# Akar masalah nyata: job yg masuk antrean bisa menunggu BERPULUH MENIT
+# tanpa dianalisa walau `.50` (satu-satunya node yg benar2 dipakai
+# orchestrator.py) sudah sehat, HANYA karena `.60`/`.61` (browser automation
+# & GUI n8n -- TAK ADA hubungannya dgn analisa video) kebetulan sedang down.
+# Gerbang itu dulu "murni preferensi user" (sinyal kasar "node hari ini
+# hidup semua"), BUKAN keharusan teknis -- sekarang dicabut permanen.
 #
-# CATATAN TEKNIS: orchestrator.py SENDIRI cuma butuh .50 + DB-VPS (bukan
-# .60/.61) utk menguras antrean -- gerbang "ketiganya aktif" di sini murni
-# preferensi user (sinyal "node hari ini benar2 hidup semua"), bukan
-# keharusan teknis pipeline. run-drain.sh SENDIRI sudah aman dipanggil
-# kapan saja (no-op diam kalau antrean kosong / .50 belum aktif) --
-# gerbang di sini cuma lapisan tambahan, bukan pengganti safety run-drain.
-#
-# Aman dipanggil berulang dari cron: no-op diam (exit 0, log 1 baris)
-# kalau salah satu profil belum reachable ATAU antrean kosong.
+# PEMICU UTAMA kini bukan di sini lagi: `enqueue.py`/`dashboard_api.py`
+# (titik masuk antrean) langsung memicu `run-drain.sh` SENDIRI (fire-and-
+# forget, background) begitu 1 job baru berhasil di-INSERT -- lihat kedua
+# file itu. Skrip INI cuma JARING PENGAMAN kalau pemicu langsung itu gagal/
+# terlewat (proses crash sebelum memicu, race, dll) -- jadi cuma perlu
+# panggil run-drain.sh langsung, TANPA gerbang apa pun. run-drain.sh SENDIRI
+# sudah no-op diam aman (cek pending + .50 reachable) -- gerbang di sini
+# betul-betul tak dibutuhkan lagi, bukan cuma "lapisan tambahan".
 # =====================================================================
 set -uo pipefail
 
@@ -27,27 +29,5 @@ log(){ echo "[analyzer-trigger $(date -u +%H:%M:%S)Z] $*" | tee -a "$LOG"; }
 # cap log
 [ -f "$LOG" ] && [ "$(wc -l < "$LOG")" -gt 500 ] && tail -n 200 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
 
-# shellcheck disable=SC1091
-. "$HOME/akses-vps/backup/lib-cs-deploy.sh"
-
-PROFILES=(
-  "yuni:warungbudina@10.66.66.50"
-  "balibruntattour:balibruntattour@10.66.66.60"
-  "gogobuda:gogobuda65@10.66.66.61"
-)
-
-not_ready=()
-for spec in "${PROFILES[@]}"; do
-  name="${spec%%:*}"; host="${spec#*:}"
-  if ! reachable_cs "$host"; then
-    not_ready+=("$name")
-  fi
-done
-
-if [ "${#not_ready[@]}" -gt 0 ]; then
-  log "belum semua Cloud Shell aktif (belum reachable: ${not_ready[*]}) -> lewati, tak sentuh pipeline."
-  exit 0
-fi
-
-log "ketiga profil Cloud Shell reachable -> panggil run-drain.sh (no-op diam kalau antrean kosong)."
+log "jaring-pengaman 10mnt -> panggil run-drain.sh (no-op diam kalau antrean kosong/.50 mati)."
 bash "$HOME/viral-pipeline/run-drain.sh"

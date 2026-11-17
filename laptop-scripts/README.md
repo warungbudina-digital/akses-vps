@@ -41,6 +41,35 @@ user nyalakan laptop
    Ada pengaman tambahan: kalau saat watchdog MULAI uptime sudah lewat batas
    (mis. dipasang di tengah sesi lama), ia menolak mematikan mesin.
 
+## Fix 2026-10-28 — overlay invisible Cloud Shell silent-drop ketikan + tab lama di-skip (cshell.py / open-and-bootstrap-cs.py)
+
+Insiden pasca-outage-listrik 27/10: ketiga Cloud Shell (yuni/balibruntattour/
+gogobuda) stuck >24 jam tanpa tunnel WireGuard naik, walau tab-nya live &
+ter-autentikasi. Dua bug akar ditemukan live di DOM Cloud Shell, bukan nebak:
+
+1. **`click_terminal()` di `cshell.py`** klik berdasar KOORDINAT -> kena
+   elemen invisible full-viewport `<security-blocking-indicator>`
+   (`position:fixed; z-index:99999; pointer-events:auto`, konten kosong —
+   diduga gate sisi-Google utk browser EOL spt Chrome 109 di laptop ini,
+   dialognya gagal render tapi blocking-nya tetap aktif). Klik ini
+   MENCABUT fokus dari textarea tepat sblm mengetik -> command silent-drop
+   total (scrape tetap bersih, nol jejak command). **Fix:** cek
+   `elementFromPoint` dulu; kalau titik klik diblok elemen non-xterm,
+   lewati klik koordinat, cukup `focus()` JS (terverifikasi live tetap
+   tembus walau overlay ada).
+2. **`open_profile()` di `open-and-bootstrap-cs.py`** vonis "tab tak
+   terdeteksi" kalau tab profil itu SUDAH terbuka (klik shortcut cuma
+   fokus ke window lama, bukan buka baru) -> bootstrap di-skip total,
+   padahal tab lama itu live & siap pakai. **Fix:** `find_existing_tab()`
+   scrape akun (`...@cloudshell`) semua shell target SEBELUM klik shortcut;
+   kalau cocok, pakai ulang tab itu langsung.
+
+Dampak: ketiga node pulih + deploy ulang terverifikasi sehat (health-check
+masing-masing: analyzer V2 ML, browser automation, GUI) pada hari yang sama.
+`backup/cs-manual-activate.sh` ikut ditambah pre-check `reachable_cs` di
+awal supaya pemanggilan manual saat node SUDAH sehat tak memaksa ketik ulang
+ke sesi yang sedang foreground menjalankan `ping` keepalive.
+
 ## Mengembalikan ke siklus hibernasi lama
 
 `Disable-ScheduledTask` ketiga task di atas, `Enable-ScheduledTask` untuk

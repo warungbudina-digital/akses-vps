@@ -123,19 +123,27 @@ class RDP:
     def eval_async(self, console_actor, expr_body, timeout=60, poll=0.5):
         """Utk kode yg mengandung Promise/fetch: evaluateJSAsync TIDAK
         meng-await Promise (jebakan terdokumentasi). Pola wajib: simpan hasil
-        ke window.__rdp_out lalu polling sinkron sampai terisi."""
+        ke window.__rdp_out lalu polling sinkron sampai terisi.
+
+        HARDEN (code-review): dulu tiap tick poll melakukan DUA round-trip
+        blocking terpisah (__rdp_err lalu __rdp_out) -> digabung jadi SATU
+        panggilan JS yg mengembalikan keduanya sekaligus via JSON.stringify,
+        menghalve traffic RDP utk tiap tick tunggu di SEMUA pemanggil (login/
+        list/per-percakapan di kedua script harvest)."""
         self.eval_js(console_actor, "window.__rdp_out = null; window.__rdp_err = null;")
         self.eval_js(console_actor, f"(async () => {{ try {{ {expr_body} }} "
                                     f"catch(e) {{ window.__rdp_err = String(e); }} }})();")
         deadline = time.time() + timeout
         while time.time() < deadline:
-            err = self.eval_js(console_actor, "window.__rdp_err")
+            raw = self.eval_js(console_actor,
+                "JSON.stringify({err: window.__rdp_err, out: window.__rdp_out})")
+            state = json.loads(self.resolve(raw))
+            err = state.get("err")
             if isinstance(err, str) and err:
                 raise RuntimeError(f"async error: {err}")
-            out = self.eval_js(console_actor, "window.__rdp_out")
-            val = self.resolve(out)
-            if val not in (None, False, ""):
-                return val
+            out = state.get("out")
+            if out not in (None, False, ""):
+                return out
             time.sleep(poll)
         raise TimeoutError("hasil async tak kunjung terisi")
 
