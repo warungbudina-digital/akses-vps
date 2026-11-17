@@ -5,16 +5,36 @@ Jalan di akses-vps (gateway ke DB-VPS via `ssh db-vps`). Auto-deteksi platform +
 external_id dari URL. Dedup lewat UNIQUE(source_url) + ON CONFLICT DO NOTHING.
 Dipakai integrasi browser (hulu) atau manual.
 
-  enqueue.py <category> <url> [<url> ...]      # N url, satu kategori
-  cat list.txt | enqueue.py --stdin            # tiap baris: "<category> <url>"
+  enqueue.py <category> <url> [<url> ...] [--views N]   # N url, satu kategori (+views sama utk semua)
+  cat list.txt | enqueue.py --stdin                      # tiap baris: "<category> <url> [views]"
 
 category: viral_video | menuju_viral_video
+views: opsional, manual (dilihat sendiri sblm enqueue) -- dipakai Title.md di reproductions/
 """
-import sys, re, subprocess, argparse
+import os, sys, re, subprocess, argparse
 from urllib.parse import urlparse, parse_qs
 
 DBVPS = "db-vps"
 CATS  = {"viral_video", "menuju_viral_video"}
+LANGS = {"id", "en", "auto"}  # None/tak disebut = default env analyzer (perilaku lama)
+# (2026-11-03, permintaan user "pemisahan permanen") titik masuk antrean
+# memicu run-drain.sh SENDIRI, fire-and-forget -- TAK lagi menunggu cron
+# 10mnt + gerbang-3-profil lama (lihat analyzer-pipeline-trigger.sh).
+RUN_DRAIN = os.path.expanduser("~/viral-pipeline/run-drain.sh")
+
+
+def trigger_drain():
+    """Background, non-blocking -- enqueue.py TAK menunggu drain selesai
+    (bisa makan menit kalau video panjang/ML whisper lambat). run-drain.sh
+    SENDIRI sudah aman no-op diam kalau .50 belum aktif -- gagal di sini
+    (proses tak ketemu dll) TAK PERNAH menggagalkan enqueue."""
+    try:
+        subprocess.Popen(["bash", RUN_DRAIN], stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                          start_new_session=True)
+    except Exception as e:
+        print(f"(peringatan: gagal memicu run-drain.sh otomatis: {e!r} -- "
+              f"jalankan manual: bash {RUN_DRAIN})", file=sys.stderr)
 
 def detect(url):
     """(platform, external_id) best-effort dari URL. external_id boleh kosong
@@ -53,6 +73,10 @@ def main():
     ap.add_argument("urls", nargs="*")
     ap.add_argument("--stdin", action="store_true", help="baca '<category> <url>' per baris dari stdin")
     ap.add_argument("--dry-run", action="store_true", help="tampilkan deteksi, jangan insert")
+    ap.add_argument("--language", choices=sorted(LANGS), default=None,
+                     help="bahasa ASR job ini (id/en/auto); tak diisi = default env analyzer")
+    ap.add_argument("--views", type=int, default=None,
+                     help="views manual (utk Title.md); tak diisi = kosong. Berlaku ke semua URL di panggilan ini")
     a = ap.parse_args()
 
     rows = []
@@ -61,32 +85,39 @@ def main():
             ln = ln.strip()
             if not ln or ln.startswith("#"):
                 continue
-            parts = ln.split(None, 1)
-            if len(parts) != 2:
+            parts = ln.split()
+            if len(parts) not in (2, 3):
                 print("lewati (format salah):", ln); continue
-            rows.append((parts[0], parts[1]))
+            views = a.views
+            if len(parts) == 3:
+                try:
+                    views = int(parts[2])
+                except ValueError:
+                    print("lewati (views bukan angka):", ln); continue
+            rows.append((parts[0], parts[1], views))
     else:
         if not a.category or not a.urls:
             ap.error("butuh <category> <url> ... (atau --stdin)")
-        rows = [(a.category, u) for u in a.urls]
+        rows = [(a.category, u, a.views) for u in a.urls]
 
-    bad = sorted({c for c, _ in rows if c not in CATS})
+    bad = sorted({c for c, _, _ in rows if c not in CATS})
     if bad:
         sys.exit(f"kategori tak valid: {bad} (harus salah satu: {sorted(CATS)})")
     if not rows:
         print("tak ada URL."); return
 
     vals = []
-    for cat, url in rows:
+    for cat, url, views in rows:
         plat, eid = detect(url)
-        print(f"  [{cat}] {plat or '?'}:{eid or '?'}  {url[:64]}")
-        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser')")
+        print(f"  [{cat}] {plat or '?'}:{eid or '?'} lang={a.language or 'default'} views={views if views is not None else '-'}  {url[:64]}")
+        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser',{lit(a.language)},"
+                     f"{views if views is not None else 'NULL'})")
 
     if a.dry_run:
         print(f"[dry-run] {len(rows)} URL (tak di-insert).")
         return
 
-    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by) VALUES "
+    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,language,views) VALUES "
            + ", ".join(vals) + " ON CONFLICT (source_url) DO NOTHING RETURNING id;")
     # -q (quiet): tekan tag status perintah ("INSERT 0 N") agar TIDAK ikut ke stdout —
     # tanpa ini token digit dari "INSERT 0 N" mencemari hitungan (id RETURNING saja yang boleh).
@@ -96,6 +127,9 @@ def main():
         sys.exit("enqueue gagal: " + r.stderr.strip()[:300])
     inserted = [x for x in r.stdout.split() if x.strip().isdigit()]
     print(f"ENQUEUE: {len(rows)} diminta -> {len(inserted)} baru, {len(rows) - len(inserted)} duplikat/skip.")
+    if inserted:
+        trigger_drain()
+        print(f"-> run-drain.sh dipicu background (job baru: {', '.join(inserted)}).")
 
 if __name__ == "__main__":
     main()
