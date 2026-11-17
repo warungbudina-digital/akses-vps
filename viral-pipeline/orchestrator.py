@@ -148,7 +148,7 @@ CLAIM_SQL = ("UPDATE media.video_ingest SET status='processing', claimed_at=now(
              "SELECT id FROM media.video_ingest WHERE status='pending' AND attempts < max_attempts "
              "ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT 1) "
              "RETURNING json_build_object('id',id,'category',category,"
-             "'platform',coalesce(platform,''),'url',source_url,'language',language)::text;")
+             "'platform',coalesce(platform,''),'url',source_url,'language',language,'views',views)::text;")
 
 def claim():
     r = psql(CLAIM_SQL)
@@ -162,7 +162,8 @@ def claim():
             # TAK kirim key itu ke /analyze -> analyzer pakai default env-nya
             # sendiri, payload IDENTIK perilaku sebelum fitur ini ada.
             return {"id": int(j["id"]), "category": j["category"],
-                    "platform": j["platform"], "url": j["url"], "language": j.get("language")}
+                    "platform": j["platform"], "url": j["url"], "language": j.get("language"),
+                    "views": j.get("views")}
     return None
 
 def fail_job(job, err):
@@ -294,12 +295,36 @@ def build_reproduction(job, analysis):
     log(f"  reproduksi VN (story-script + blueprint) tersimpan: {outdir}/")
     return outdir
 
+_CAT_LABEL = {"viral_video": "Viral", "menuju_viral_video": "Menuju Viral"}
+
+def write_title_md(job, outdir):
+    """(2026-11-17, permintaan user) Title.md ringkas per job di folder
+    reproductions/job-<id>/ -- link URL + kriteria viral/menuju-viral + views
+    (manual, dari enqueue.py --views) + catatan. Best-effort PENUH sama pola
+    build_reproduction(): kegagalan tulis file TAK PERNAH gagalkan job.
+    Catatan hampir pasti kosong saat ditulis (user_notes diisi manusia
+    SETELAH review, bukan saat job ini baru selesai dianalisa) -- placeholder
+    sengaja, bukan bug."""
+    views = job.get("views")
+    md = (
+        f"# Job #{job['id']} -- {job.get('platform','?')}\n\n"
+        f"- **URL:** {job['url']}\n"
+        f"- **Kriteria:** {_CAT_LABEL.get(job['category'], job['category'])}\n"
+        f"- **Views:** {views if views is not None else '-'}\n"
+        f"- **Catatan:** (diisi manual setelah review)\n"
+    )
+    try:
+        with open(os.path.join(outdir, "Title.md"), "w", encoding="utf-8") as f:
+            f.write(md)
+    except Exception as e:
+        log(f"  (write_title_md: gagal tulis, dilewati):", repr(e)[:150])
+
 def push_reproduction_template(job, outdir):
     """(2026-11-03, permintaan user, otomatisasi langkah manual) Push folder
-    reproductions/job-<id>/ (9 berkas: .ir.json/.srt/.vn-blueprint.json/
+    reproductions/job-<id>/ (10 berkas: .ir.json/.srt/.vn-blueprint.json/
     .cutlist.txt/.vn-recipe.md/.segments.json/.story-script.md/.pexels-plan.json/
-    .pixabay-plan.json dari build_reproduction()+fetch_and_push_footage()) APA
-    ADANYA ke gfootage:raw-template/job-<id>/ -- "template" = cetak-biru
+    .pixabay-plan.json/Title.md dari build_reproduction()+fetch_and_push_footage()+
+    write_title_md()) APA ADANYA ke gfootage:raw-template/job-<id>/ -- "template" = cetak-biru
     reproduksi siap dipakai manual (beda dari audio-template/ yg cuma MP3
     bank-suara, dan dari RN7 Movies/Seal/ yg klip stok mentah). Best-effort
     PENUH sama persis pola build_reproduction()/fetch_and_push_footage()/
@@ -516,6 +541,7 @@ def main():
                 log("  x write:", werr); fail_job(job, werr); cleanup(job["id"]); fail += 1; continue
             outdir = build_reproduction(job, data["analysis"])   # best-effort, tak pernah gagalkan job
             if outdir:
+                write_title_md(job, outdir)                      # best-effort, tak pernah gagalkan job
                 fetch_and_push_footage(job, outdir)              # best-effort, tak pernah gagalkan job
                 push_reproduction_template(job, outdir)          # best-effort, tak pernah gagalkan job
             split_and_push_raw(job, relpath, title)              # best-effort, tak pernah gagalkan job

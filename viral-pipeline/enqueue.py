@@ -5,10 +5,11 @@ Jalan di akses-vps (gateway ke DB-VPS via `ssh db-vps`). Auto-deteksi platform +
 external_id dari URL. Dedup lewat UNIQUE(source_url) + ON CONFLICT DO NOTHING.
 Dipakai integrasi browser (hulu) atau manual.
 
-  enqueue.py <category> <url> [<url> ...]      # N url, satu kategori
-  cat list.txt | enqueue.py --stdin            # tiap baris: "<category> <url>"
+  enqueue.py <category> <url> [<url> ...] [--views N]   # N url, satu kategori (+views sama utk semua)
+  cat list.txt | enqueue.py --stdin                      # tiap baris: "<category> <url> [views]"
 
 category: viral_video | menuju_viral_video
+views: opsional, manual (dilihat sendiri sblm enqueue) -- dipakai Title.md di reproductions/
 """
 import os, sys, re, subprocess, argparse
 from urllib.parse import urlparse, parse_qs
@@ -74,6 +75,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="tampilkan deteksi, jangan insert")
     ap.add_argument("--language", choices=sorted(LANGS), default=None,
                      help="bahasa ASR job ini (id/en/auto); tak diisi = default env analyzer")
+    ap.add_argument("--views", type=int, default=None,
+                     help="views manual (utk Title.md); tak diisi = kosong. Berlaku ke semua URL di panggilan ini")
     a = ap.parse_args()
 
     rows = []
@@ -82,32 +85,39 @@ def main():
             ln = ln.strip()
             if not ln or ln.startswith("#"):
                 continue
-            parts = ln.split(None, 1)
-            if len(parts) != 2:
+            parts = ln.split()
+            if len(parts) not in (2, 3):
                 print("lewati (format salah):", ln); continue
-            rows.append((parts[0], parts[1]))
+            views = a.views
+            if len(parts) == 3:
+                try:
+                    views = int(parts[2])
+                except ValueError:
+                    print("lewati (views bukan angka):", ln); continue
+            rows.append((parts[0], parts[1], views))
     else:
         if not a.category or not a.urls:
             ap.error("butuh <category> <url> ... (atau --stdin)")
-        rows = [(a.category, u) for u in a.urls]
+        rows = [(a.category, u, a.views) for u in a.urls]
 
-    bad = sorted({c for c, _ in rows if c not in CATS})
+    bad = sorted({c for c, _, _ in rows if c not in CATS})
     if bad:
         sys.exit(f"kategori tak valid: {bad} (harus salah satu: {sorted(CATS)})")
     if not rows:
         print("tak ada URL."); return
 
     vals = []
-    for cat, url in rows:
+    for cat, url, views in rows:
         plat, eid = detect(url)
-        print(f"  [{cat}] {plat or '?'}:{eid or '?'} lang={a.language or 'default'}  {url[:64]}")
-        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser',{lit(a.language)})")
+        print(f"  [{cat}] {plat or '?'}:{eid or '?'} lang={a.language or 'default'} views={views if views is not None else '-'}  {url[:64]}")
+        vals.append(f"('{esc(cat)}',{lit(plat)},'{esc(url)}',{lit(eid)},'browser',{lit(a.language)},"
+                     f"{views if views is not None else 'NULL'})")
 
     if a.dry_run:
         print(f"[dry-run] {len(rows)} URL (tak di-insert).")
         return
 
-    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,language) VALUES "
+    sql = ("INSERT INTO media.video_ingest (category,platform,source_url,external_id,enqueued_by,language,views) VALUES "
            + ", ".join(vals) + " ON CONFLICT (source_url) DO NOTHING RETURNING id;")
     # -q (quiet): tekan tag status perintah ("INSERT 0 N") agar TIDAK ikut ke stdout —
     # tanpa ini token digit dari "INSERT 0 N" mencemari hitungan (id RETURNING saja yang boleh).
